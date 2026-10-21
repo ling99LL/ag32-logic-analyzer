@@ -1,5 +1,7 @@
 # Logic 4 通道逻辑分析仪 — 交接快照（2026-10-12）
 
+> **2026-10-21 最新上板验证**：当前接线为 `PIN_5 -> CH1/PIN_7`。冒烟 `23 PASS / 1 false FAIL`，失败项由旧脚本的主机发送时序导致，硬件边沿触发实测脉冲宽度 `300.0 ms`；50 MHz 在频率切换后等待 50 ms 的条件下连续 `100/100` 帧通过，33.333 MHz 和 25 MHz 均 `20/20` 通过；200 帧满深连续捕获 `0` 丢帧。完整记录见 [TEST_REPORT_2026-10-21_PIN5_CH1.md](TEST_REPORT_2026-10-21_PIN5_CH1.md)。
+
 ## 当前版本
 
 - **固件 / 上位机脚本**：git commit `62f7375`（`fix(logic): resurrect DAC hard macro + calibrate DMA pacing; add board test tools`，分支 `foc2205`）；上轮 `d1818b3`（`feat(logic): raise self-test square wave to 10/25/50 MHz + on-board loopback verification`）——**均未推送**（`foc2205` 本地领先远端，含 `94f8b3f`、`d1818b3`、`62f7375` 及本文档提交）
@@ -19,7 +21,7 @@
 - 芯片：AG32VF303，QFN32（`logic_device = AGRV2KQ32`，**不可改**）
 - 引脚：CH0~CH3 = PIN_7/8/9/10（输入，弱下拉；板级编号 CH1~CH4）；**PIN_11 = DAC0 模拟波形输出**（QFN32 固定复用，勿再分配数字功能）；**PIN_5 = SG_OUT 数字输出**（方波 1Hz~100MHz 或触发/脉冲引擎）；LED = PIN_19/18/13/14（低电平点亮）
 - 接口：USB 2.0 FS CDC = **COM33**（SUMP/OLS，PulseView 直连）；UART0 调试 = COM26；烧录用 DAPLink `cmsis-dap-openocd`
-- 自测回环：**PIN_10 ↔ PIN_11 跳线**（10/12 夜已接上并回环实测 **18/18**：DAC 全波形经 PIN_11→PIN_10 捕获验证）；自测方波（PIN_5）回环需把跳线改接 **PIN_5 ↔ 任一 CH**（未做）
+- 自测回环：**2026-10-21 当前接线为 PIN_5 -> CH1/PIN_7**，已完成 100 kHz~50 MHz 数字回环、8 档时基和 200 帧满深压测；历史 `PIN_10 ↔ PIN_11` DAC 回环曾完成 **18/18**。
 
 ## 实测结论（均上板实测，非纸面）
 
@@ -46,8 +48,9 @@
 pio run -e logic_analyzer -t upload      # 只改 C：编译 + DAPLink 烧录（不重建 logic）
 pio run -e logic_analyzer -t prelogic    # 改 .ve：先重新生成 logic 工程
 python live_hardware_test.py             # 上板回归（COM33；需 PIN_5↔任一 CH 跳线，自测方波源已改 PIN_5）
-python tools/smoke_test.py COM33         # 烧录后冒烟（协议/采样/引擎/DAC，19 项，无跳线也可跑）
+python tools/smoke_test.py COM33         # 烧录后冒烟（项数随接线变化；PIN_5 单线为 24 项）
 python tools/loopback_test.py COM33      # 板级回环（需 PIN_10↔PIN_11 跳线；DAC 全波形闭环，18 项）
+# 最新 PIN_5 -> CH1 实测报告：TEST_REPORT_2026-10-21_PIN5_CH1.md
 # 改 .ve 必须三段式：prelogic → logic/run_quartus_steps.bat → logic/run_supra.bat → -t logic + -t upload
 #   ★ 勿用 run_quartus.tcl / execute_flow（本机 Quartus 收尾 fast-fail 会被误判为失败，见下节）
 ```
