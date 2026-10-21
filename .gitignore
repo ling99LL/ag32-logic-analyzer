@@ -1,4 +1,6 @@
 .pio/
+__pycache__/
+*.py[cod]
 *.vo
 *.sdo
 *.bin

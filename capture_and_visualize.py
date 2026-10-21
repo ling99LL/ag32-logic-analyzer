@@ -1,6 +1,7 @@
 import serial
 import time
 import sys
+from pathlib import Path
 
 def capture_samples(port="COM33", count=1024, divider=9):
     ser = serial.Serial(port, 115200, timeout=2)
@@ -85,8 +86,9 @@ def main():
 
     print_ascii_waveform(samples, length=80)
     
-    export_vcd(samples, r"C:\Users\Administrator\Documents\AG32\Logic\capture.vcd")
-    print("\nExported standard VCD waveform to capture.vcd (Ready for PulseView / GTKWave).")
+    output_path = Path(__file__).resolve().with_name("capture.vcd")
+    export_vcd(samples, str(output_path))
+    print(f"\nExported standard VCD waveform to {output_path} (Ready for PulseView / GTKWave).")
 
 if __name__ == "__main__":
     main()

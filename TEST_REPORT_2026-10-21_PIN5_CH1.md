@@ -29,7 +29,7 @@
 运行命令：
 
 ```powershell
-cd C:\Users\Administrator\Documents\AG32\Logic
+cd <repository>
 python .\tools\smoke_test.py COM33
 ```
 
