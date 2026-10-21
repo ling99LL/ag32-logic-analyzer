@@ -4,9 +4,11 @@
 
 板子上另外带一路数字方波/脉冲输出和一路 DAC 波形输出，调试采样器、做触发测试或者给外部电路提供测试信号都比较方便。
 
-![AG32VF303 四通道逻辑分析仪实物](hardware/images/assembled-board.jpg)
+<p align="center">
+  <img src="hardware/images/assembled-board-portrait.jpg" alt="AG32VF303 四通道逻辑分析仪实物" width="460">
+</p>
 
-![PulseView 连接 AG32-PlanB](captures/pulseview_check.png)
+<p align="center"><sub>AG32VF303 QFN32 主控，4 路输入、数字输出、DAC 输出和 USB-C 集成在一块板上。</sub></p>
 
 ## 主要参数
 
@@ -59,28 +61,47 @@
 
 CPLD 器件必须使用 `AGRV2KQ32`，对应 QFN32 封装。这个型号不能按 LQFP100 的默认器件配置。
 
-## 外观与结构
+## 硬件与结构
 
-外壳采用上下壳分件，PCB 通过四角螺孔固定。下面的模型来自实际使用的 EasyEDA Pro 工程导出，可直接用于结构检查和二次修改。
+外壳分上下两件，PCB 通过四角螺孔固定。下图为 EasyEDA Pro 工程中的装配视图，排针、按键、USB-C 和 PCB 的相对位置可以直接看出来。
 
-| 外壳装配 | PCB 正面 |
-|---|---|
-| <img src="hardware/images/enclosure-assembly.png" alt="逻辑分析仪外壳装配" width="520"> | <img src="hardware/images/pcb-front.png" alt="逻辑分析仪 PCB 正面" width="260"> |
+<p align="center">
+  <img src="hardware/images/enclosure-assembly.png" alt="逻辑分析仪外壳装配" width="760">
+</p>
 
-PCB 背面：
+<p align="center"><sub>外壳、PCB、排针和接口装配视图</sub></p>
 
-<img src="hardware/images/pcb-back.png" alt="逻辑分析仪 PCB 背面" width="300">
+### PCB
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <a href="hardware/images/pcb-front.png"><img src="hardware/images/pcb-front.png" alt="逻辑分析仪 PCB 正面" width="320"></a><br>
+      <sub>正面</sub>
+    </td>
+    <td align="center" width="50%">
+      <a href="hardware/images/pcb-back.png"><img src="hardware/images/pcb-back.png" alt="逻辑分析仪 PCB 背面" width="320"></a><br>
+      <sub>背面</sub>
+    </td>
+  </tr>
+</table>
 
 ### 原理图
 
-<img src="hardware/images/schematic.png" alt="AG32 逻辑分析仪与信号发生器原理图" width="100%">
+<p align="center">
+  <a href="hardware/images/schematic.png"><img src="hardware/images/schematic.png" alt="AG32 逻辑分析仪与信号发生器原理图" width="960"></a>
+</p>
+
+<p align="center"><sub>点击图片查看原始尺寸</sub></p>
 
 ### 外壳文件
 
-- [顶壳 STEP](hardware/enclosure/top-case.step)
-- [底壳 STEP](hardware/enclosure/bottom-case.step)
+| 文件 | 格式 | 大小 |
+|---|---|---:|
+| [顶壳 STEP](hardware/enclosure/top-case.step) | STEP AP214 | 约 60 KB |
+| [底壳 STEP](hardware/enclosure/bottom-case.step) | STEP AP214 | 约 90 KB |
 
-两个文件均为 STEP AP214，长度单位为毫米。文件保留原始几何结构，便于在 CAD 软件里继续修改。
+两个模型均保留原始几何结构，长度单位为毫米，可用于结构检查、修改或 3D 打印。仓库不附带特定打印机的切片参数，打印前需要根据材料、喷嘴直径和装配间隙检查模型尺寸。
 
 ## 快速开始
 
@@ -133,6 +154,12 @@ Quartus 13 在本机完成工作后可能以 `0xC0000409` 退出，状态要以�
 3. 串口：设备对应的 COM 口
 4. 波特率：`115200`
 5. 搜索设备，正常应显示 `AG32-PlanB`
+
+<p align="center">
+  <img src="captures/pulseview_check.png" alt="PulseView 连接 AG32-PlanB" width="960">
+</p>
+
+<p align="center"><sub>PulseView 已识别 AG32-PlanB，并完成 8192 点采集</sub></p>
 
 PulseView、MCP server 和波形发生器不能同时打开同一个 COM 口。
 
