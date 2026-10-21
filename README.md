@@ -4,6 +4,8 @@
 
 板子上另外带一路数字方波/脉冲输出和一路 DAC 波形输出，调试采样器、做触发测试或者给外部电路提供测试信号都比较方便。
 
+![AG32VF303 四通道逻辑分析仪实物](hardware/images/assembled-board.jpg)
+
 ![PulseView 连接 AG32-PlanB](captures/pulseview_check.png)
 
 ## 主要参数
@@ -56,6 +58,29 @@
 | LED1–LED4 | `PIN_19` / `PIN_18` / `PIN_13` / `PIN_14` | 低电平点亮 |
 
 CPLD 器件必须使用 `AGRV2KQ32`，对应 QFN32 封装。这个型号不能按 LQFP100 的默认器件配置。
+
+## 外观与结构
+
+外壳采用上下壳分件，PCB 通过四角螺孔固定。下面的模型来自实际使用的 EasyEDA Pro 工程导出，可直接用于结构检查和二次修改。
+
+| 外壳装配 | PCB 正面 |
+|---|---|
+| <img src="hardware/images/enclosure-assembly.png" alt="逻辑分析仪外壳装配" width="520"> | <img src="hardware/images/pcb-front.png" alt="逻辑分析仪 PCB 正面" width="260"> |
+
+PCB 背面：
+
+<img src="hardware/images/pcb-back.png" alt="逻辑分析仪 PCB 背面" width="300">
+
+### 原理图
+
+<img src="hardware/images/schematic.png" alt="AG32 逻辑分析仪与信号发生器原理图" width="100%">
+
+### 外壳文件
+
+- [顶壳 STEP](hardware/enclosure/top-case.step)
+- [底壳 STEP](hardware/enclosure/bottom-case.step)
+
+两个文件均为 STEP AP214，长度单位为毫米。文件保留原始几何结构，便于在 CAD 软件里继续修改。
 
 ## 快速开始
 
@@ -177,5 +202,6 @@ node .\dist\index.js
 - [HANDOVER.md](HANDOVER.md)：开发环境、烧录流程和排障记录
 - [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md)：采样、触发和 USB 性能
 - [TEST_REPORT_2026-10-21_PIN5_CH1.md](TEST_REPORT_2026-10-21_PIN5_CH1.md)：最近一次上板测试
+- [hardware/README.md](hardware/README.md)：实物图、PCB 图和外壳 STEP 索引
 - [mcp/README.md](mcp/README.md)：MCP server 使用说明
 
