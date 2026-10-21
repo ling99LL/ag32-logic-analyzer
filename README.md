@@ -5,7 +5,7 @@
 板子上另外带一路数字方波/脉冲输出和一路 DAC 波形输出，调试采样器、做触发测试或者给外部电路提供测试信号都比较方便。
 
 <p align="center">
-  <img src="hardware/images/assembled-board-portrait.jpg" alt="AG32VF303 四通道逻辑分析仪实物" width="460">
+  <img src="hardware/images/assembled-board-hero.jpg" alt="AG32VF303 四通道逻辑分析仪实物" width="640">
 </p>
 
 <p align="center"><sub>AG32VF303 QFN32 主控，4 路输入、数字输出、DAC 输出和 USB-C 集成在一块板上。</sub></p>

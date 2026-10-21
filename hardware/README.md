@@ -6,7 +6,7 @@
 
 | 文件 | 内容 |
 |---|---|
-| `images/assembled-board-portrait.jpg` | 焊接完成并装在外壳中的实物照片，适合文档竖版展示 |
+| `images/assembled-board-hero.jpg` | 焊接完成并装在外壳中的实物照片，顺时针旋转 90° 后的横版展示图 |
 | `images/assembled-board.jpg` | 实物照片原图 |
 | `images/enclosure-assembly.png` | 外壳、PCB、排针和接口的装配视图 |
 | `images/pcb-front.png` | PCB 正面布线图 |
