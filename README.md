@@ -168,6 +168,30 @@ Quartus 13 在本机完成工作后可能以 `0xC0000409` 退出，状态要以�
 
 `analog_ip.v` 里的 DAC keep-guard 和 `run_quartus_steps.bat` 里的 `alta_dac` 检查不要删除，否则 Quartus 可能把 DAC 硬核当成无用逻辑优化掉。
 
+### 空片 SWD 烧录
+
+空片状态下 CPLD logic 还没有写入，普通固件 `upload` 不能完成整片初始化。首次上电使用 CMSIS-DAP 的 SWD 两线接口，把 option bytes、CPLD 位流和 MCU 固件作为一个批处理镜像一次写入。
+
+接线：
+
+- DAPLink `SWDIO` 接 AG32 `PIN_24 / JTMS`
+- DAPLink `SWCLK` 接 AG32 `PIN_25 / JTCK`
+- GND 共地
+- `3V3` 接目标板 VDD；DAPLink 供电时确认 J3V 跳线已接通
+- `BOOT0 / PIN_30` 保持低电平
+
+烧录：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\flash_blank_swd.ps1
+```
+
+脚本会先运行 PlatformIO 的 `buildbatch`，再通过 CMSIS-DAP SWD 写入完整的 `*_batch.bin`。默认 SWD 时钟为 5 MHz；如果出现 Flash 写超时，可以改用 `-AdapterSpeed 2500`。有多台探针时用 `-AdapterSerial` 指定 DAPLink。
+
+如果空片首次连接无法 halt，可以在 DAPLink `nRESET` 接到 AG32 `PIN_4 / NRST` 后加 `-UseSrst`。
+
+写入完成后脚本会执行 `reset run`。如果复位后没有重新加载 logic 或程序仍不运行，断电重上电一次即可。详细参数和硬件前提写在脚本头部，也可以用 `-DryRun` 只打印命令、不操作芯片。
+
 ## 连接 PulseView
 
 设备会枚举成一个 USB 串口，例如 `COM33`。PulseView 中选择：
