@@ -1,1 +1,3 @@
 *.step binary
+*.bin binary
+logic/logic_board.inc binary

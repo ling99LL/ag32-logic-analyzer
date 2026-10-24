@@ -188,6 +188,10 @@ powershell -ExecutionPolicy Bypass -File .\tools\flash_blank_swd.ps1
 
 脚本会先运行 PlatformIO 的 `buildbatch`，再通过 CMSIS-DAP SWD 写入完整的 `*_batch.bin`。默认 SWD 时钟为 5 MHz；如果出现 Flash 写超时，可以改用 `-AdapterSpeed 2500`。有多台探针时用 `-AdapterSerial` 指定 DAPLink。
 
+仓库已经包含本次验证过的预编译位流 `logic/logic_board.bin`，所以新 clone 的源码环境不需要 Quartus 和 Supra 就能生成批处理镜像并完成首次烧录。只有修改 `.ve`、`analog_ip.v` 或其他 CPLD 逻辑源码时，才需要重新执行三段式编译并更新这个位流。
+
+当前位流大小 `22,427 B`，SHA-256：`AEAE971EA7A4D6DCC33A3E5252DEF7201A327234517A1AC2D835C70F588A0A00`。
+
 如果空片首次连接无法 halt，可以在 DAPLink `nRESET` 接到 AG32 `PIN_4 / NRST` 后加 `-UseSrst`。
 
 写入完成后脚本会执行 `reset run`。如果复位后没有重新加载 logic 或程序仍不运行，断电重上电一次即可。详细参数和硬件前提写在脚本头部，也可以用 `-DryRun` 只打印命令、不操作芯片。

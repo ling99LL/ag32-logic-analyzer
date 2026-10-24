@@ -4,6 +4,7 @@ __pycache__/
 *.vo
 *.sdo
 *.bin
+!logic/logic_board.bin
 *.vcd
 db/
 incremental_db/
