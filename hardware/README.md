@@ -6,6 +6,10 @@
 
 | 文件 | 内容 |
 |---|---|
+| `images/prototype-board-closeup.jpg` | 透明上盖整机正面近照 |
+| `images/prototype-board-angle.jpg` | 整机斜视近照 |
+| `images/enclosure-side-view.jpg` | 透明上盖、PCB 和底壳的侧面结构 |
+| `images/enclosure-parts-overview.jpg` | 透明上盖、装配后的整机和裸板背面 |
 | `images/assembled-board-hero.jpg` | 焊接完成并装在外壳中的实物照片，顺时针旋转 90° 后的横版展示图 |
 | `images/assembled-board.jpg` | 实物照片原图 |
 | `images/enclosure-assembly.png` | 外壳、PCB、排针和接口的装配视图 |

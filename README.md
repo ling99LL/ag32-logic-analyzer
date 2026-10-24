@@ -5,10 +5,10 @@
 板子上另外带一路数字方波/脉冲输出和一路 DAC 波形输出，调试采样器、做触发测试或者给外部电路提供测试信号都比较方便。
 
 <p align="center">
-  <img src="hardware/images/assembled-board-hero.jpg" alt="AG32VF303 四通道逻辑分析仪实物" width="640">
+  <img src="hardware/images/prototype-board-closeup.jpg" alt="AG32VF303 四通道逻辑分析仪实物" width="760">
 </p>
 
-<p align="center"><sub>AG32VF303 QFN32 主控，4 路输入、数字输出、DAC 输出和 USB-C 集成在一块板上。</sub></p>
+<p align="center"><sub>AG32VF303 QFN32 主控，4 路输入、数字输出、DAC 输出和 USB-C 集成在一块板上，透明上盖可以直接看到调试接口和状态指示。</sub></p>
 
 ## 主要参数
 
@@ -63,13 +63,36 @@ CPLD 器件必须使用 `AGRV2KQ32`，对应 QFN32 封装。这个型号不能�
 
 ## 硬件与结构
 
-外壳分上下两件，PCB 通过四角螺孔固定。下图为 EasyEDA Pro 工程中的装配视图，排针、按键、USB-C 和 PCB 的相对位置可以直接看出来。
+外壳分上下两件，透明上盖和底壳把 PCB 包在中间，四角螺孔固定。排针从左侧伸出，USB-C、烧录接口和两颗按键都留在上盖可视区域内，装配后仍能直接检查板卡状态。
+
+### 实物装配
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <a href="hardware/images/prototype-board-angle.jpg"><img src="hardware/images/prototype-board-angle.jpg" alt="逻辑分析仪斜视实物" width="360"></a><br>
+      <sub>整机斜视</sub>
+    </td>
+    <td align="center" width="50%">
+      <a href="hardware/images/enclosure-side-view.jpg"><img src="hardware/images/enclosure-side-view.jpg" alt="逻辑分析仪侧面结构" width="360"></a><br>
+      <sub>透明上盖和侧面结构</sub>
+    </td>
+  </tr>
+</table>
 
 <p align="center">
-  <img src="hardware/images/enclosure-assembly.png" alt="逻辑分析仪外壳装配" width="760">
+  <a href="hardware/images/enclosure-parts-overview.jpg"><img src="hardware/images/enclosure-parts-overview.jpg" alt="上盖、整机和裸板背面" width="760"></a>
 </p>
 
-<p align="center"><sub>外壳、PCB、排针和接口装配视图</sub></p>
+<p align="center"><sub>透明上盖、装配后的整机和裸板背面</sub></p>
+
+### 结构模型
+
+<p align="center">
+  <a href="hardware/images/enclosure-assembly.png"><img src="hardware/images/enclosure-assembly.png" alt="逻辑分析仪外壳装配" width="700"></a>
+</p>
+
+<p align="center"><sub>EasyEDA Pro 工程中的外壳、PCB、排针和接口装配视图</sub></p>
 
 ### PCB
 
