@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
-  ChevronDown,
   CircleStop,
   Clock3,
   Cpu,
@@ -27,6 +26,8 @@ import { api, isMockMode } from "./api.js";
 import { WaveformCanvas } from "./components/WaveformCanvas.js";
 import { Segmented, SignalSources } from "./components/SignalSources.js";
 import { HistoryView } from "./components/HistoryView.js";
+import { ThemePicker } from "./components/ThemePicker.js";
+import { UI_THEMES } from "../shared/types.js";
 import { formatBytes, formatFrequency, formatTime, sampleRateChoices } from "./format.js";
 import type {
   AppSettings,
@@ -40,6 +41,7 @@ import type {
   Pin11Config,
   Pin5EngineConfig,
   StorageUsage,
+  UiTheme,
 } from "../shared/types.js";
 import { DEFAULT_SETTINGS } from "../shared/types.js";
 
@@ -48,6 +50,11 @@ type ViewName = "analyzer" | "history";
 const CHANNEL_NAMES: ChannelName[] = ["CH1", "CH2", "CH3", "CH4"];
 
 export default function App() {
+  const initialTheme = (() => {
+    const candidate = window.localStorage.getItem("ag32.theme") as UiTheme | null;
+    return candidate && UI_THEMES.includes(candidate) ? candidate : DEFAULT_SETTINGS.theme;
+  })();
+  const [theme, setTheme] = useState<UiTheme>(initialTheme);
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -61,6 +68,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
   const eventRef = useRef<(event: DaemonEvent) => void>(() => undefined);
 
   const busy = busyCount > 0;
@@ -100,6 +108,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme === "light" ? "light" : "dark";
+    window.localStorage.setItem("ag32.theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
     const unsubscribe = api.subscribe((event) => eventRef.current(event));
     void bootstrap();
     return unsubscribe;
@@ -126,6 +140,7 @@ export default function App() {
       setSnapshot(initialSnapshot);
       setLatestCapture(initialSnapshot.latestCapture);
       setSettings({ ...DEFAULT_SETTINGS, ...savedSettings });
+      setTheme(initialTheme);
       setSettingsLoaded(true);
       await scanDevices();
     } catch (failure) {
@@ -311,6 +326,23 @@ export default function App() {
           </button>
         </nav>
 
+        <div className="topbar-tools">
+          <ThemePicker
+            value={theme}
+            onChange={setTheme}
+            onOpenChange={setThemeMenuOpen}
+          />
+          <button
+            className="danger-action"
+            onClick={() => void safeIdle()}
+            disabled={!connected || busy}
+            title="PIN_11 关闭，PIN_5 输出低电平"
+          >
+            <Power size={16} />
+            安全空闲
+          </button>
+        </div>
+
         <div className="connection-cluster">
           {isMockMode && <span className="preview-badge"><Sparkles size={13} /> 界面预览</span>}
           {mcpClient && <span className="mcp-badge"><Cpu size={13} /> MCP 在线</span>}
@@ -341,12 +373,9 @@ export default function App() {
             <Usb size={15} />
             {connected ? "断开" : "连接"}
           </button>
-          <button className="danger-action" onClick={() => void safeIdle()} disabled={!connected || busy} title="PIN_11 关闭，PIN_5 输出低电平">
-            <Power size={16} />
-            安全空闲
-          </button>
         </div>
       </header>
+      {themeMenuOpen && <div className="theme-scrim" aria-hidden="true" />}
 
       {view === "analyzer" ? (
         <main className="workspace">

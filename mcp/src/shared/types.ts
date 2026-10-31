@@ -15,6 +15,8 @@ export type Pin5TriggerMode = (typeof PIN5_TRIGGER_MODES)[number];
 
 export const CLIENT_ROLES = ["desktop", "mcp", "cli"] as const;
 export type ClientRole = (typeof CLIENT_ROLES)[number];
+export const UI_THEMES = ["graphite", "slate", "light", "ember"] as const;
+export type UiTheme = (typeof UI_THEMES)[number];
 
 export type TriggerMode = "immediate" | "level" | "edge";
 export type EdgeDirection = "rising" | "falling";
@@ -194,6 +196,7 @@ export interface DeviceListResult {
 }
 
 export interface AppSettings {
+  theme: UiTheme;
   sampleRateHz: number;
   sampleCount: number;
   pretriggerPercent: number;
@@ -209,6 +212,7 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  theme: "graphite",
   sampleRateHz: 20_000_000,
   sampleCount: 4_096,
   pretriggerPercent: 50,

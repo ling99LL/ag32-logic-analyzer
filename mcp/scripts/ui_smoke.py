@@ -47,6 +47,25 @@ def main() -> None:
             page.wait_for_timeout(500)
             page.screenshot(path=str(OUT / "analyzer-1440.png"), full_page=True)
 
+            for theme in ["slate", "light", "ember", "graphite"]:
+                page.get_by_role("button", name="选择界面主题").click()
+                page.get_by_role("menuitemradio").filter(has_text={
+                    "slate": "冷蓝",
+                    "light": "极光",
+                    "ember": "暖碳",
+                    "graphite": "石墨青",
+                }[theme]).click()
+                page.wait_for_timeout(120)
+                if page.locator("html").get_attribute("data-theme") != theme:
+                    raise RuntimeError(f"Theme was not applied: {theme}")
+                if page.evaluate("localStorage.getItem('ag32.theme')") != theme:
+                    raise RuntimeError(f"Theme was not persisted: {theme}")
+                page.screenshot(path=str(OUT / f"theme-{theme}-1440.png"), full_page=True)
+                page.get_by_role("button", name="历史记录").click()
+                page.wait_for_timeout(80)
+                page.screenshot(path=str(OUT / f"theme-{theme}-history.png"), full_page=True)
+                page.get_by_role("button", name="波形分析").click()
+
             page.get_by_role("button", name="历史记录").click()
             page.get_by_role("heading", name="历史记录").wait_for()
             page.screenshot(path=str(OUT / "history-1440.png"), full_page=True)

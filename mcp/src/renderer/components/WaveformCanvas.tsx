@@ -50,6 +50,14 @@ export function WaveformCanvas({ frame, visibility }: Props) {
     setCursor(null);
   }, [frame?.id]);
 
+  const [themeRevision, setThemeRevision] = useState(0);
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => setThemeRevision((revision) => revision + 1));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     if (!wrapperRef.current) return;
     const observer = new ResizeObserver(([entry]) => {
@@ -65,7 +73,7 @@ export function WaveformCanvas({ frame, visibility }: Props) {
 
   useEffect(() => {
     drawWaveform(canvasRef.current, samples, frame, visibility, viewport, size, cursor);
-  }, [cursor, frame, samples, size, viewport, visibility]);
+  }, [cursor, frame, samples, size, viewport, visibility, themeRevision]);
 
   const visibleChannels = (Object.keys(visibility) as ChannelName[]).filter(
     (channel) => visibility[channel],
@@ -195,7 +203,16 @@ function drawWaveform(
   const context = canvas.getContext("2d");
   if (!context) return;
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
-  context.fillStyle = "#121512";
+  const styles = getComputedStyle(document.documentElement);
+  const theme = (name: string, fallback: string): string => styles.getPropertyValue(name).trim() || fallback;
+  const waveBackground = theme("--wave-bg", "#121512");
+  const waveGrid = theme("--wave-grid", "#2a312a");
+  const waveTrack = theme("--wave-track", "#242b25");
+  const waveText = theme("--wave-text", "#d7e8de");
+  const waveMuted = theme("--wave-muted", "#7e8a7f");
+  const waveformTrigger = theme("--amber", "#f3ba63");
+  const waveformCursor = theme("--wave-cursor", "rgba(238, 244, 239, 0.65)");
+  context.fillStyle = waveBackground;
   context.fillRect(0, 0, size.width, size.height);
 
   const left = 78;
@@ -209,20 +226,24 @@ function drawWaveform(
   );
   const trackHeight = plotHeight / Math.max(1, visible.length);
 
-  context.strokeStyle = "#2a312a";
+  context.strokeStyle = waveGrid;
   context.lineWidth = 1;
   context.font = '11px "Cascadia Mono", "Consolas", monospace';
-  context.fillStyle = "#7e8a7f";
+  context.fillStyle = waveMuted;
   const durationNs = frame ? (frame.sampleCount / frame.actualSampleRateHz) * 1e9 : 0;
-  for (let index = 0; index <= 10; index += 1) {
-    const x = left + (plotWidth * index) / 10;
+  const tickCount = plotWidth < 420 ? 3 : plotWidth < 900 ? 5 : 7;
+  for (let index = 0; index <= tickCount; index += 1) {
+    const x = left + (plotWidth * index) / tickCount;
     context.beginPath();
     context.moveTo(x + 0.5, top);
     context.lineTo(x + 0.5, top + plotHeight);
     context.stroke();
     if (frame) {
-      const value = durationNs * (viewport.start + ((viewport.end - viewport.start) * index) / 10);
-      context.fillText(formatTime(value), x + 4, 16);
+      const value = durationNs * (viewport.start + ((viewport.end - viewport.start) * index) / tickCount);
+      const label = axisLabel(value);
+      const textWidth = context.measureText(label).width;
+      const textX = Math.max(left + 2, Math.min(x + 4, left + plotWidth - textWidth - 2));
+      context.fillText(label, textX, 16);
     }
   }
 
@@ -230,12 +251,12 @@ function drawWaveform(
     const center = top + trackHeight * channelIndex + trackHeight / 2;
     const high = center - trackHeight * 0.27;
     const low = center + trackHeight * 0.27;
-    context.strokeStyle = "#242b25";
+    context.strokeStyle = waveTrack;
     context.beginPath();
     context.moveTo(left, low + 8);
     context.lineTo(left + plotWidth, low + 8);
     context.stroke();
-    context.fillStyle = channel === "CH1" ? "#d7e8de" : "#8b998d";
+    context.fillStyle = channel === "CH1" ? waveText : waveMuted;
     context.font = '600 12px "Segoe UI", "Microsoft YaHei", sans-serif';
     context.fillText(CHANNEL_LABELS[channel], 12, center - 3);
     context.fillStyle = CHANNEL_COLORS[channel];
@@ -278,24 +299,32 @@ function drawWaveform(
 
   if (frame.pretriggerPercent > 0) {
     const triggerX = left + plotWidth * Math.min(1, Math.max(0, frame.pretriggerPercent / 100));
-    context.strokeStyle = "#f3ba63";
+    context.strokeStyle = waveformTrigger;
     context.setLineDash([5, 5]);
     context.beginPath();
     context.moveTo(triggerX, top);
     context.lineTo(triggerX, top + plotHeight);
     context.stroke();
     context.setLineDash([]);
-    context.fillStyle = "#f3ba63";
+    context.fillStyle = waveformTrigger;
     context.font = '10px "Cascadia Mono", "Consolas", monospace';
     context.fillText("TRIGGER", triggerX + 5, top + 12);
   }
 
   if (cursor !== null) {
     const x = left + cursor * plotWidth;
-    context.strokeStyle = "rgba(238, 244, 239, 0.65)";
+    context.strokeStyle = waveformCursor;
     context.beginPath();
     context.moveTo(x + 0.5, top);
     context.lineTo(x + 0.5, top + plotHeight);
     context.stroke();
   }
+
+}
+
+function axisLabel(ns: number): string {
+  if (ns >= 1e9) return `${Number((ns / 1e9).toFixed(3))} s`;
+  if (ns >= 1e6) return `${Number((ns / 1e6).toFixed(1))} ms`;
+  if (ns >= 1e3) return `${Number((ns / 1e3).toFixed(1))} µs`;
+  return `${Math.round(ns)} ns`;
 }
