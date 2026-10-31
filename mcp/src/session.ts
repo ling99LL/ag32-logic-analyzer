@@ -19,15 +19,35 @@ import {
   makeMaskFrame,
   makeReadCountFrame,
   normalizeSampleCount,
+  encodePin5Config,
+  encodeTimeNs,
+  PIN5_PRESCALES,
+  PIN5_TICK_BASE_NS,
   WAVE_TYPE_CODES,
   parseInfoFrame,
   pin11FrequencyLimit,
   sampleRateToDivider,
   type WaveType,
 } from "./protocol.js";
+import type {
+  CaptureRequest,
+  CaptureTrigger,
+  ChannelName,
+  FirmwareInfo,
+  Pin5Status,
+  Pin5EngineConfig,
+  Pin11Config,
+} from "./shared/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const runsRoot = path.resolve(__dirname, "../runs");
+
+export class CaptureAbortedError extends ProtocolError {
+  constructor(message = "Capture was aborted to yield the device") {
+    super(message);
+    this.name = "CaptureAbortedError";
+  }
+}
 
 export class Ag32Session {
   private serial: SerialLike | null = null;
@@ -96,6 +116,19 @@ export class Ag32Session {
     return readInfoFrame(serial);
   }
 
+  async configurePin11(input: Pin11Config): Promise<ReturnType<typeof parseInfoFrame>> {
+    if (input.rateCapHz) {
+      await this.serialOrThrow.write(makeExtendedFrame(OPS.rateCap, input.rateCapHz));
+    }
+    return this.configurePin11Waveform(input);
+  }
+
+  async configurePin11Static(mode: 0 | 1 | 2 | "off" | "low" | "high"): Promise<void> {
+    const serial = this.serialOrThrow;
+    const value = typeof mode === "string" ? { off: 0, low: 1, high: 2 }[mode] : mode;
+    await serial.write(makeExtendedFrame(OPS.pin11Static, value));
+  }
+
   async configurePin5SquareWave(frequencyHz: number): Promise<ReturnType<typeof readPin5StatusFrame>> {
     const serial = this.serialOrThrow;
     await serial.write(makeExtendedFrame(OPS.pin5Config, 1 << 8));
@@ -110,7 +143,7 @@ export class Ag32Session {
     delayTicks: number;
     widthTicks: number;
     action?: "arm" | "fire" | "reset";
-  }): Promise<ReturnType<typeof readPin5StatusFrame>> {
+  }): Promise<Pin5Status> {
     const serial = this.serialOrThrow;
     await serial.write(makeExtendedFrame(OPS.pin5Config, input.configValue));
     await serial.write(makeExtendedFrame(OPS.pin5Delay, input.delayTicks));
@@ -123,24 +156,108 @@ export class Ag32Session {
     return readPin5StatusFrame(serial);
   }
 
+  async pin5EngineControl(action: "arm" | "fire" | "reset"): Promise<Pin5Status> {
+    const serial = this.serialOrThrow;
+    await serial.write(makeExtendedFrame(OPS.pin5Control, PIN5_CONTROL_BITS[action]));
+    await serial.flush();
+    return readPin5StatusFrame(serial);
+  }
+
+  async configurePin5Engine(input: Pin5EngineConfig): Promise<Pin5Status> {
+    const delay = encodeTimeNs(input.delayNs);
+    const width = encodeTimeNs(input.widthNs);
+    const prescale = Math.max(delay.prescale, width.prescale);
+    const tickNs = PIN5_TICK_BASE_NS * PIN5_PRESCALES[prescale];
+    const configValue = encodePin5Config({
+      mode: input.mode,
+      activeLevel: input.activeLevel,
+      idleLevel: input.idleLevel,
+      prescale,
+    });
+    return this.configurePin5Trigger({
+      configValue,
+      delayTicks: Math.round(input.delayNs / tickNs),
+      widthTicks: Math.round(input.widthNs / tickNs),
+      action: input.action,
+    });
+  }
+
+  async safeIdle(): Promise<{ info: FirmwareInfo; pin5: Pin5Status }> {
+    await this.configurePin11Static(0);
+    const pin5 = await this.configurePin5Engine({
+      mode: "host_level",
+      activeLevel: "low",
+      idleLevel: "low",
+      delayNs: 0,
+      widthNs: 0,
+      action: "reset",
+    });
+    const info = await this.getInfo();
+    return { info, pin5 };
+  }
+
   async capture(input: {
     sampleRateHz: number;
     sampleCount: number;
+    pretriggerPercent?: number;
+    trigger?: CaptureTrigger;
+  }, options?: {
+    registerAbort?: (abort: () => Promise<void>) => void;
+  }): Promise<{
+    samples: Buffer;
+    divider: number;
+    actualSampleRateHz: number;
+    sampleCount: number;
     triggerMask: number;
     triggerValue: number;
-  }): Promise<{ samples: Buffer; divider: number; actualSampleRateHz: number; sampleCount: number }> {
+    pretriggerPercent: number;
+  }> {
     const serial = this.serialOrThrow;
     const sampleCount = normalizeSampleCount(input.sampleCount);
     const divider = sampleRateToDivider(input.sampleRateHz);
+    const pretriggerPercent = Math.max(0, Math.min(99, input.pretriggerPercent ?? 0));
+    const trigger = normalizeTrigger(input.trigger);
     await serial.flush();
     await serial.write(makeDividerFrame(divider));
-    await serial.write(makeReadCountFrame(sampleCount));
-    await serial.write(makeMaskFrame(0xc0, input.triggerMask));
-    await serial.write(makeMaskFrame(0xc1, input.triggerValue));
+    await serial.write(makeReadCountFrame(sampleCount, pretriggerPercent));
+    await serial.write(makeMaskFrame(0xc0, trigger.mask));
+    await serial.write(makeMaskFrame(0xc1, trigger.value));
     await serial.flush();
-    await serial.write(Buffer.from([0x01]));
-    const samples = await this.readCapture(serial, sampleCount, 8000);
-    return { samples, divider, actualSampleRateHz: dividerToSampleRate(divider), sampleCount };
+
+    let abortPromise: Promise<void> | null = null;
+    let aborted = false;
+    const abort = (): Promise<void> => {
+      if (abortPromise) return abortPromise;
+      aborted = true;
+      abortPromise = (async () => {
+        await serial.write(Buffer.from([0x00])).catch(() => undefined);
+        serial.cancelReads?.(new CaptureAbortedError());
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        await serial.flush().catch(() => undefined);
+      })();
+      return abortPromise;
+    };
+    options?.registerAbort?.(abort);
+
+    try {
+      await serial.write(Buffer.from([0x01]));
+      const samples = await this.readCapture(serial, sampleCount, 8000);
+      return {
+        samples,
+        divider,
+        actualSampleRateHz: dividerToSampleRate(divider),
+        sampleCount,
+        triggerMask: trigger.mask,
+        triggerValue: trigger.value,
+        pretriggerPercent,
+      };
+    } catch (error) {
+      if (aborted && abortPromise) {
+        await abortPromise;
+        throw new CaptureAbortedError();
+      }
+      throw error;
+    }
   }
 
   private async readCapture(serial: SerialLike, count: number, timeoutMs: number): Promise<Buffer> {
@@ -180,7 +297,25 @@ export class Ag32Session {
   }
 }
 
-export function triggerMask(channels: readonly string[], highChannels: readonly string[]): { mask: number; value: number } {
+export function normalizeTrigger(trigger?: CaptureTrigger): { mask: number; value: number } {
+  if (!trigger || trigger.mode === "immediate") return { mask: 0, value: 0 };
+  if (trigger.mode === "edge") {
+    const edges = trigger.edges ?? [];
+    const channels = edges.map((edge) => edge.channel);
+    let value = 0;
+    for (const edge of edges) {
+      if (edge.direction === "rising") value |= channelBits([edge.channel]);
+    }
+    if (channels.length === 0) return { mask: 0, value: 0 };
+    return { mask: channelBits(channels) | 0x10, value };
+  }
+  return triggerMask(trigger.channels ?? [], trigger.highChannels ?? []);
+}
+
+export function triggerMask(
+  channels: readonly ChannelName[],
+  highChannels: readonly ChannelName[],
+): { mask: number; value: number } {
   const mask = channelBits(channels);
   const highMask = channelBits(highChannels);
   if (mask === 0) return { mask: 0, value: 0 };

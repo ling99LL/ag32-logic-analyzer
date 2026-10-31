@@ -17,7 +17,7 @@ import {
   channelBits,
 } from "../protocol.js";
 import { analyzeSamples, exportVcd, findActiveChannels } from "../analysis.js";
-import { triggerMask } from "../session.js";
+import { normalizeTrigger, triggerMask } from "../session.js";
 
 test("extended frames are five bytes with little-endian payload", () => {
   assert.deepEqual([...makeExtendedFrame(0x84, 0x01020304)], [0x84, 0x04, 0x03, 0x02, 0x01]);
@@ -25,6 +25,7 @@ test("extended frames are five bytes with little-endian payload", () => {
 
 test("sample count frame matches the SUMP word encoding", () => {
   assert.deepEqual([...makeReadCountFrame(1024)], [0x81, 0xff, 0x00, 0xff, 0x00]);
+  assert.deepEqual([...makeReadCountFrame(1024, 50)], [0x81, 0xff, 0x00, 0x7f, 0x00]);
   assert.throws(() => makeReadCountFrame(1023));
 });
 
@@ -73,6 +74,20 @@ test("PIN_5 and PIN_11 configuration helpers match the documented encodings", ()
 test("level trigger masks are generated from channel names", () => {
   assert.deepEqual(triggerMask(["CH1", "CH2"], ["CH2"]), { mask: 0b0011, value: 0b0010 });
   assert.throws(() => triggerMask(["CH1"], ["CH2"]));
+});
+
+test("edge trigger polarity and pretrigger inputs map to firmware bits", () => {
+  assert.deepEqual(
+    normalizeTrigger({
+      mode: "edge",
+      edges: [
+        { channel: "CH1", direction: "rising" },
+        { channel: "CH4", direction: "falling" },
+      ],
+    }),
+    { mask: 0b11001, value: 0b0001 },
+  );
+  assert.deepEqual(normalizeTrigger({ mode: "immediate" }), { mask: 0, value: 0 });
 });
 
 test("channel measurements and VCD export are internally consistent", () => {

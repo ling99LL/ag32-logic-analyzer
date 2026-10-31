@@ -1,4 +1,8 @@
 node_modules/
 dist/
 runs/
+artifacts/
+release/
+*.out.log
+*.err.log
 *.log

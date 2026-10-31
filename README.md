@@ -1,6 +1,6 @@
 # AG32VF303 四通道逻辑分析仪
 
-用 AG32VF303 内部的 CPLD 做 4 路硬件同步采样，MCU 负责 SUMP/OLS 协议和 USB CDC。设备接入电脑后可以直接用 PulseView 打开，不需要专用上位机或驱动。
+用 AG32VF303 内部的 CPLD 做 4 路硬件同步采样，MCU 负责 SUMP/OLS 协议和 USB CDC。设备既可以直接用 PulseView 打开，也可以使用本仓库提供的 **AG32 Logic Studio** 桌面上位机。
 
 板子上另外带一路数字方波/脉冲输出和一路 DAC 波形输出，调试采样器、做触发测试或者给外部电路提供测试信号都比较方便。
 
@@ -9,6 +9,22 @@
 </p>
 
 <p align="center"><sub>AG32VF303 QFN32 主控，4 路输入、数字输出、DAC 输出和 USB-C 集成在一块板上，透明上盖可以直接看到调试接口和状态指示。</sub></p>
+
+## AG32 Logic Studio 桌面端
+
+AG32 Logic Studio 把四通道采集、触发、测量、历史记录和两路信号输出放在同一个桌面工作区。桌面上位机与 MCP 通过共享 `ag32d` 串口后台同时工作，人工看波形时 AI 仍可修改信号源或发起采集。
+
+<p align="center">
+  <a href="mcp/docs/images/ag32-logic-studio.png"><img src="mcp/docs/images/ag32-logic-studio.png" alt="AG32 Logic Studio 桌面端界面" width="980"></a>
+</p>
+
+<p align="center"><sub>四通道 Canvas 波形、硬件触发、边沿测量、PIN_5/PIN_11 输出控制和 MCP 并发调试</sub></p>
+
+- 立即、电平、单通道上升/下降沿触发，支持预触发位置。
+- 最近 100 帧实时预览，手动和 MCP 采集自动写入持久历史。
+- VCD 导出、收藏、2 GB 历史上限和内存/磁盘占用统计。
+- PIN_5 方波与电平/脉冲引擎，PIN_11 DAC 四种波形及静态输出。
+- Windows 安装包和便携 ZIP 从 [最新 Release](https://github.com/ling99LL/ag32-logic-analyzer/releases/latest) 下载。
 
 ## 主要参数
 
@@ -20,10 +36,10 @@
 | 硬件采样深度 | `8192` 点 |
 | 输入引脚 | `PIN_7`、`PIN_8`、`PIN_9`、`PIN_10` |
 | 通信接口 | USB 2.0 Full-Speed CDC |
-| 上位机协议 | SUMP / OLS |
+| 上位机 | AG32 Logic Studio、PulseView / Sigrok |
+| 自动化接口 | 共享 `ag32d` 后台与 MCP server |
 | 数字输出 | `PIN_5`，方波或触发/脉冲引擎 |
 | 模拟输出 | `PIN_11`，DAC0 正弦/方波/锯齿/三角波 |
-| 自动化接口 | `mcp/` 中的 MCP server |
 
 采样率计算公式为 `100 MHz / (div + 1)`。分频器为 16 位，最高档是 100 MSa/s，最低可以到约 1.5 kSa/s。
 
@@ -136,9 +152,21 @@ CPLD 器件必须使用 `AGRV2KQ32`，对应 QFN32 封装。这个型号不能�
 - RISC-V toolchain、Supra、AGM OpenOCD
 - Quartus II `13.0sp1`，只在重建 CPLD 逻辑时需要
 - Python 3.10+，用于测试脚本和波形发生器
-- Node.js 20+，用于 MCP server
+- Node.js 20+，用于桌面端、共享后台和 MCP server
 
 工程路径不要包含中文。
+
+### 运行桌面上位机
+
+开发模式：
+
+```powershell
+cd mcp
+npm install
+npm run desktop
+```
+
+也可以从 [最新 Release](https://github.com/ling99LL/ag32-logic-analyzer/releases/latest) 下载 Windows 安装包或便携 ZIP。桌面端与 MCP 共用本机 `ag32d`；最后客户端断开后后台空闲 10 秒退出。
 
 ### 只烧录 MCU 固件
 
@@ -212,7 +240,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\flash_blank_swd.ps1
 
 <p align="center"><sub>PulseView 已识别 AG32-PlanB，并完成 8192 点采集</sub></p>
 
-PulseView、MCP server 和波形发生器不能同时打开同一个 COM 口。
+PulseView 必须以独占方式打开设备，不能与 AG32 Logic Studio 或 MCP 同时采集。桌面端和 MCP 之间则通过同一个 `ag32d` 后台共享串口，可以同时调试。
 
 ## 测试脚本
 
@@ -252,9 +280,9 @@ python .\tools\loopback_test.py COM33
 
 数字方波由 CPLD 产生。DAC 波表由 DMAC 循环搬运，默认采样率上限为 `5 MSa/s`。
 
-## MCP Server
+## 桌面端与 MCP
 
-MCP server 只控制已经烧录好的设备，提供连接、采集、触发、测量和信号源设置。它不负责编译、烧录或 JTAG。
+桌面端和 MCP 都只控制已经烧录好的设备。它们共用本机命名管道、命令事务队列、帧级采集让出、预览缓存和持久历史；不负责编译、烧录或 JTAG。
 
 ```powershell
 cd mcp
@@ -265,7 +293,7 @@ node .\scripts\mcp_selftest.mjs
 node .\dist\index.js
 ```
 
-注册 MCP 时使用本仓库下的 `mcp\dist\index.js`。工具列表和硬件检查步骤见 [mcp/README.md](mcp/README.md)。
+MCP 保留原有工具名、参数和主要返回语义，并新增安全空闲、最近采集读取、PIN_5 单步控制和 PIN_11 静态输出。注册 MCP 时使用本仓库下的 `mcp\dist\index.js`，完整工具列表、桌面端架构和硬件检查步骤见 [mcp/README.md](mcp/README.md)。
 
 ## 使用限制
 
@@ -281,5 +309,5 @@ node .\dist\index.js
 - [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md)：采样、触发和 USB 性能
 - [TEST_REPORT_2026-10-21_PIN5_CH1.md](TEST_REPORT_2026-10-21_PIN5_CH1.md)：最近一次上板测试
 - [hardware/README.md](hardware/README.md)：实物图、PCB 图和外壳 STEP 索引
-- [mcp/README.md](mcp/README.md)：MCP server 使用说明
+- [mcp/README.md](mcp/README.md)：桌面端、共享后台和 MCP 使用说明
 

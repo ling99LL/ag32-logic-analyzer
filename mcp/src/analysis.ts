@@ -1,18 +1,5 @@
 import { CHANNELS } from "./protocol.js";
-
-export interface ChannelMeasurement {
-  channel: string;
-  pin: string;
-  bit: number;
-  highCount: number;
-  lowCount: number;
-  edgeCount: number;
-  firstEdgeIndex: number | null;
-  lastEdgeIndex: number | null;
-  firstEdgeTimeNs: number | null;
-  lastEdgeTimeNs: number | null;
-  estimatedFrequencyHz: number | null;
-}
+import type { ChannelMeasurement, ChannelName } from "./shared/types.js";
 
 export function analyzeSamples(samples: Uint8Array, sampleRateHz: number): ChannelMeasurement[] {
   const samplePeriodNs = 1_000_000_000 / sampleRateHz;
@@ -56,7 +43,7 @@ export function analyzeSamples(samples: Uint8Array, sampleRateHz: number): Chann
   });
 }
 
-export function findActiveChannels(measurements: ChannelMeasurement[], minimumEdges = 3): string[] {
+export function findActiveChannels(measurements: ChannelMeasurement[], minimumEdges = 3): ChannelName[] {
   return measurements.filter((item) => item.edgeCount >= minimumEdges).map((item) => item.channel);
 }
 

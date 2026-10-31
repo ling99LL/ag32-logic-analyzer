@@ -1,3 +1,15 @@
+import type {
+  ChannelName,
+  FirmwareInfo,
+  Pin5Status,
+  Pin5TriggerMode,
+  WaveType,
+} from "./shared/types.js";
+import { PIN5_TRIGGER_MODES, WAVE_TYPES } from "./shared/types.js";
+
+export { PIN5_TRIGGER_MODES, WAVE_TYPES };
+export type { Pin5TriggerMode, WaveType } from "./shared/types.js";
+
 export const SUMP_BAUD_RATE = 115200;
 export const SUMP_ID = "1ALS";
 export const CLOCK_HZ = 100_000_000;
@@ -26,17 +38,9 @@ export const OPS = {
   rateCap: 0x8b,
   getInfo: 0x8c,
   pin5Query: 0x8d,
+  pin11Static: 0x8e,
 } as const;
 
-export const CHANNELS = [
-  { boardName: "CH1", bit: 0, pin: "PIN_7" },
-  { boardName: "CH2", bit: 1, pin: "PIN_8" },
-  { boardName: "CH3", bit: 2, pin: "PIN_9" },
-  { boardName: "CH4", bit: 3, pin: "PIN_10" },
-] as const;
-
-export const WAVE_TYPES = ["sine", "square", "sawtooth", "triangle"] as const;
-export type WaveType = (typeof WAVE_TYPES)[number];
 export const WAVE_TYPE_CODES: Record<WaveType, number> = {
   sine: 0,
   square: 1,
@@ -55,13 +59,12 @@ export const WAVE_MIN_POINTS: Record<WaveType, number> = {
   triangle: 8,
 };
 
-export const PIN5_TRIGGER_MODES = [
-  "delayed_level",
-  "delayed_pulse",
-  "host_level",
-  "host_pulse",
+export const CHANNELS = [
+  { boardName: "CH1" as ChannelName, bit: 0, pin: "PIN_7" },
+  { boardName: "CH2" as ChannelName, bit: 1, pin: "PIN_8" },
+  { boardName: "CH3" as ChannelName, bit: 2, pin: "PIN_9" },
+  { boardName: "CH4" as ChannelName, bit: 3, pin: "PIN_10" },
 ] as const;
-export type Pin5TriggerMode = (typeof PIN5_TRIGGER_MODES)[number];
 export const PIN5_PRESCALES = [1, 10, 100, 1000] as const;
 export const PIN5_TICK_BASE_NS = 10;
 
@@ -97,17 +100,21 @@ export function makeDividerFrame(divider: number): Buffer {
   return frame;
 }
 
-export function makeReadCountFrame(sampleCount: number): Buffer {
+export function makeReadCountFrame(sampleCount: number, pretriggerPercent = 0): Buffer {
   if (sampleCount % 4 !== 0 || sampleCount < MIN_SAMPLE_COUNT || sampleCount > MAX_SAMPLE_COUNT) {
     throw new ProtocolError("sampleCount must be a multiple of 4 in 4..8192");
   }
+  const clampedPretrigger = Math.max(0, Math.min(99, pretriggerPercent));
+  const pretiggerSamples = Math.floor((sampleCount * clampedPretrigger) / 100 / 4) * 4;
+  const postSamples = Math.max(4, sampleCount - pretiggerSamples);
   const words = sampleCount / 4 - 1;
+  const postWords = postSamples / 4 - 1;
   const frame = Buffer.alloc(5);
   frame[0] = OPS.readCount;
   frame[1] = words & 0xff;
   frame[2] = (words >> 8) & 0xff;
-  frame[3] = words & 0xff;
-  frame[4] = (words >> 8) & 0xff;
+  frame[3] = postWords & 0xff;
+  frame[4] = (postWords >> 8) & 0xff;
   return frame;
 }
 
@@ -148,16 +155,7 @@ export function normalizeSampleCount(count: number): number {
   return clamped - (clamped % 4);
 }
 
-export function parseInfoFrame(payload: Buffer): {
-  firmware: { major: number; minor: number };
-  waveform: WaveType;
-  amplitudePercent: number;
-  requestedFrequencyHz: number;
-  actualFrequencyHz: number;
-  flags: number;
-  tableLength: number;
-  rateCapHz: number;
-} {
+export function parseInfoFrame(payload: Buffer): FirmwareInfo {
   if (payload.length < 20) {
     throw new ProtocolError(`GET_INFO payload must be 20 bytes, received ${payload.length}`);
   }
@@ -176,16 +174,7 @@ export function parseInfoFrame(payload: Buffer): {
   };
 }
 
-export function parsePin5StatusFrame(payload: Buffer): {
-  busy: boolean;
-  done: boolean;
-  outputHigh: boolean;
-  remainingTicks: number;
-  config: number;
-  squareSelected: boolean;
-  tickNs: number;
-  remainingNs: number;
-} {
+export function parsePin5StatusFrame(payload: Buffer): Pin5Status {
   if (payload.length < 7) {
     throw new ProtocolError(`PIN_5 status payload must be 7 bytes, received ${payload.length}`);
   }

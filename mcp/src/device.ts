@@ -12,6 +12,7 @@ export interface SerialLike {
   read(length: number, timeoutMs?: number): Promise<Buffer>;
   close(): Promise<void>;
   flush(): Promise<void>;
+  cancelReads?(error: Error): void;
 }
 
 export class Ag32SerialDevice implements SerialLike {
@@ -99,11 +100,19 @@ export class Ag32SerialDevice implements SerialLike {
     });
   }
 
+  cancelReads(error: Error): void {
+    for (const waiter of this.waiters.splice(0)) waiter.reject(error);
+  }
+
   flush(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.port.flush((error) => {
-        if (error) reject(error);
-        else resolve();
+        if (error) {
+          reject(error);
+          return;
+        }
+        this.pending = [];
+        resolve();
       });
     });
   }
@@ -151,6 +160,26 @@ export async function readExactly(serial: SerialLike, length: number, timeoutMs 
   return Buffer.concat(chunks);
 }
 
+async function readResponseFrame(serial: SerialLike, expectedLength: number, timeoutMs: number): Promise<Buffer> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new ProtocolError(`Timed out waiting for a ${expectedLength}-byte response frame`);
+    }
+    const sync = await readExactly(serial, 1, Math.max(100, remaining));
+    if (sync[0] !== 0xaa) continue;
+    const lengthByte = await readExactly(serial, 1, Math.max(100, deadline - Date.now()));
+    const length = lengthByte[0];
+    if (length === expectedLength) {
+      return readExactly(serial, expectedLength, Math.max(100, deadline - Date.now()));
+    }
+    if (length > 0 && length <= 64) {
+      await readExactly(serial, length, Math.max(100, deadline - Date.now())).catch(() => undefined);
+    }
+  }
+}
+
 export async function probeSumpId(serial: SerialLike): Promise<boolean> {
   await serial.flush();
   await serial.write(Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00]));
@@ -163,11 +192,7 @@ export async function probeSumpId(serial: SerialLike): Promise<boolean> {
 export async function readInfoFrame(serial: SerialLike, timeoutMs = 1000): Promise<ReturnType<typeof parseInfoFrame>> {
   await serial.flush();
   await serial.write(Buffer.from([OPS.getInfo, 0, 0, 0, 0]));
-  const header = await readExactly(serial, 2, timeoutMs);
-  if (header[0] !== 0xaa) throw new ProtocolError(`Invalid response sync byte: 0x${header[0].toString(16)}`);
-  const length = header[1];
-  if (length !== 20) throw new ProtocolError(`Expected GET_INFO length 20, received ${length}`);
-  return parseInfoFrame(await readExactly(serial, length, timeoutMs));
+  return parseInfoFrame(await readResponseFrame(serial, 20, timeoutMs));
 }
 
 export async function readPin5StatusFrame(
@@ -176,11 +201,7 @@ export async function readPin5StatusFrame(
 ): Promise<ReturnType<typeof parsePin5StatusFrame>> {
   await serial.flush();
   await serial.write(Buffer.from([OPS.pin5Query, 0, 0, 0, 0]));
-  const header = await readExactly(serial, 2, timeoutMs);
-  if (header[0] !== 0xaa) throw new ProtocolError(`Invalid response sync byte: 0x${header[0].toString(16)}`);
-  const length = header[1];
-  if (length !== 7) throw new ProtocolError(`Expected PIN_5 status length 7, received ${length}`);
-  return parsePin5StatusFrame(await readExactly(serial, length, timeoutMs));
+  return parsePin5StatusFrame(await readResponseFrame(serial, 7, timeoutMs));
 }
 
 export async function listSerialPorts(): Promise<string[]> {

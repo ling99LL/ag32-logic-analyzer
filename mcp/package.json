@@ -1,26 +1,80 @@
 {
-  "name": "ag32-logic-mcp",
+  "name": "ag32-logic-studio",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "MCP server for the AG32VF303 four-channel logic analyzer and signal generator",
-  "main": "dist/index.js",
+  "author": "AG32 Logic Studio",
+  "description": "AG32 Logic Studio desktop app, shared serial daemon, and MCP server",
+  "main": "dist/desktop/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "check": "npm run build && node --test dist/test/*.js",
+    "build:node": "tsc -p tsconfig.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:node && npm run build:renderer",
+    "typecheck:renderer": "tsc -p tsconfig.renderer.json",
+    "check": "npm run build:node && npm run typecheck:renderer && node --test dist/test/*.js",
     "selftest": "node scripts/mcp_selftest.mjs",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "daemon": "node dist/daemon/index.js",
+    "desktop": "electron .",
+    "dev:renderer": "vite",
+    "dist:win": "npm run build && electron-builder --win nsis zip"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "lucide-react": "^1.66.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "serialport": "^12.0.0",
-    "zod": "^3.25.76"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
-    "typescript": "^5.9.3"
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5"
   },
   "engines": {
     "node": ">=20"
+  },
+  "build": {
+    "appId": "com.ag32.logicstudio",
+    "productName": "AG32 Logic Studio",
+    "artifactName": "${productName}-${version}-${arch}-portable.${ext}",
+    "asar": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }

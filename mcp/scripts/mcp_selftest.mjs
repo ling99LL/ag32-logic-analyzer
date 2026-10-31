@@ -16,8 +16,12 @@ const requiredTools = [
   "capture",
   "configure_pin5_square_wave",
   "configure_pin5_trigger_engine",
+  "pin5_engine_control",
   "configure_pin11_waveform",
+  "configure_pin11_static_level",
   "run_loopback_check",
+  "safe_idle",
+  "get_latest_capture",
 ];
 const missingTools = requiredTools.filter((name) => !tools.tools.some((tool) => tool.name === name));
 if (missingTools.length > 0) throw new Error(`Missing MCP tools: ${missingTools.join(", ")}`);
