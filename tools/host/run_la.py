@@ -1,10 +1,10 @@
 """
 AG32-LA4 Interactive Command-Line Tool (Plan B: CPLD Hardware Sampler)
 Usage:
-    python run_la.py                     # Default 1024 samples capture & ASCII display
-    python run_la.py --samples 4096      # Capture 4096 samples
-    python run_la.py --divider 9         # Sample at 10 MSa/s
-    python run_la.py --vcd my_trace.vcd  # Export to VCD file
+    python tools/host/run_la.py                     # Default 1024 samples capture & ASCII display
+    python tools/host/run_la.py --samples 4096      # Capture 4096 samples
+    python tools/host/run_la.py --divider 9         # Sample at 10 MSa/s
+    python tools/host/run_la.py --vcd my_trace.vcd  # Export to VCD file
 """
 
 import serial

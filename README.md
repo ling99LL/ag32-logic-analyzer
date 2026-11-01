@@ -11,6 +11,8 @@
 
 使用 AG32VF303 内部 CPLD 完成 4 路硬件同步采样，MCU 通过 USB CDC 提供 SUMP/OLS 协议。既可以直接使用 PulseView，也可以使用全新的 **AG32 Logic Studio** 浅色桌面上位机；桌面端与 MCP 共享同一个串口后台，人工看波形时 AI 仍可发起采集和调整输出。
 
+[文件索引](INDEX.md) · [下载安装版](https://github.com/ling99LL/ag32-logic-analyzer/releases/latest) · [桌面端说明](mcp/README.md) · [硬件资料](hardware/README.md)
+
 <p align="center">
   <a href="mcp/docs/images/ag32-logic-studio.png"><img src="mcp/docs/images/ag32-logic-studio.png" alt="AG32 Logic Studio v0.1.2 浅色工作台" width="980"></a>
 </p>
@@ -94,7 +96,7 @@ Windows 10/11 x64。安装包暂未签名，首次运行时 Windows SmartScreen 
 
 50 MHz 在 100 MSa/s 下只有 2 个采样点/周期，已经接近奈奎斯特极限。切换 PIN_5 频率后要等待约 50 ms，再启动捕获。
 
-详细数据见 [最近一次测试报告](TEST_REPORT_2026-10-21_PIN5_CH1.md) 和 [性能报告](PERFORMANCE_REPORT.md)。
+详细数据见 [最近一次测试报告](docs/reports/TEST_REPORT_2026-10-21_PIN5_CH1.md) 和 [性能报告](docs/reports/PERFORMANCE_REPORT.md)。
 
 ## 硬件连接
 
@@ -288,7 +290,7 @@ python .\tools\smoke_test.py COM33
 `PIN_5 -> CH1/PIN_7` 数字回环：
 
 ```powershell
-python .\live_hardware_test.py
+python .\tools\host\live_hardware_test.py
 ```
 
 `PIN_11 -> CH1/PIN_7` DAC 回环：
@@ -297,7 +299,7 @@ python .\live_hardware_test.py
 python .\tools\loopback_test.py COM33
 ```
 
-冒烟测试的项目数会随跳线和当前接线变化。更多环境和排障说明见 [HANDOVER.md](HANDOVER.md)。
+冒烟测试的项目数会随跳线和当前接线变化。更多环境和排障说明见 [docs/HANDOVER.md](docs/HANDOVER.md)。
 
 ## 板载信号源
 
@@ -340,9 +342,11 @@ MCP 保留原有工具名、参数和主要返回语义，并新增安全空闲�
 
 ## 文档
 
-- [HANDOVER.md](HANDOVER.md)：开发环境、烧录流程和排障记录
-- [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md)：采样、触发和 USB 性能
-- [TEST_REPORT_2026-10-21_PIN5_CH1.md](TEST_REPORT_2026-10-21_PIN5_CH1.md)：最近一次上板测试
+- [docs/HANDOVER.md](docs/HANDOVER.md)：开发环境、烧录流程和排障记录
+- [docs/reports/PERFORMANCE_REPORT.md](docs/reports/PERFORMANCE_REPORT.md)：采样、触发和 USB 性能
+- [docs/reports/TEST_REPORT_2026-10-21_PIN5_CH1.md](docs/reports/TEST_REPORT_2026-10-21_PIN5_CH1.md)：最近一次上板测试
+- [docs/README.md](docs/README.md)：报告、截图和背景文档导航
+- [INDEX.md](INDEX.md)：整个项目的文件索引与分类说明
 - [hardware/README.md](hardware/README.md)：实物图、PCB 图和外壳 STEP 索引
 - [mcp/README.md](mcp/README.md)：桌面端、共享后台和 MCP 使用说明
 

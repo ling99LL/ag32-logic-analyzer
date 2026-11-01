@@ -74,7 +74,7 @@ CH2/CH3/CH4 edges: [0, 0, 0]
 运行命令：
 
 ```powershell
-python .\live_hardware_test.py
+python .\tools\host\live_hardware_test.py
 ```
 
 8 档时基全部通过，但脚本内置的高频子测试只在切换 `TEST_DIV` 后等待 10 ms。该等待时间不足以让 50 MHz 方波稳定进入当前采样相位，因此出现过一次：
@@ -105,7 +105,7 @@ python .\live_hardware_test.py
 
 ## 4. 采样时基
 
-`live_hardware_test.py` 的 8 档绝对时基检查全部通过：
+`tools/host/live_hardware_test.py` 的 8 档绝对时基检查全部通过：
 
 | 采样率 | 分频 | 测试源频率 | 捕获结果 |
 |---:|---:|---:|---|
@@ -132,7 +132,7 @@ python .\live_hardware_test.py
 运行命令：
 
 ```powershell
-python .\benchmark_usb_suite.py
+python .\tools\host\benchmark_usb_suite.py
 ```
 
 | 负载 | 接收字节 | 耗时 | 有效吞吐 | 线速率 |
@@ -155,7 +155,7 @@ python .\benchmark_usb_suite.py
 
 ### 5.2 满深捕获上传
 
-`live_hardware_test.py` 的 8192 点上传：
+`tools/host/live_hardware_test.py` 的 8192 点上传：
 
 ```text
 Upload Length: 8192 / 8192 bytes

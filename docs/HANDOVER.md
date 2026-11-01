@@ -1,6 +1,6 @@
 # Logic 4 通道逻辑分析仪 — 交接快照（2026-10-12）
 
-> **2026-10-21 最新上板验证**：当前接线为 `PIN_5 -> CH1/PIN_7`。冒烟 `23 PASS / 1 false FAIL`，失败项由旧脚本的主机发送时序导致，硬件边沿触发实测脉冲宽度 `300.0 ms`；50 MHz 在频率切换后等待 50 ms 的条件下连续 `100/100` 帧通过，33.333 MHz 和 25 MHz 均 `20/20` 通过；200 帧满深连续捕获 `0` 丢帧。完整记录见 [TEST_REPORT_2026-10-21_PIN5_CH1.md](TEST_REPORT_2026-10-21_PIN5_CH1.md)。
+> **2026-10-21 最新上板验证**：当前接线为 `PIN_5 -> CH1/PIN_7`。冒烟 `23 PASS / 1 false FAIL`，失败项由旧脚本的主机发送时序导致，硬件边沿触发实测脉冲宽度 `300.0 ms`；50 MHz 在频率切换后等待 50 ms 的条件下连续 `100/100` 帧通过，33.333 MHz 和 25 MHz 均 `20/20` 通过；200 帧满深连续捕获 `0` 丢帧。完整记录见 [TEST_REPORT_2026-10-21_PIN5_CH1.md](reports/TEST_REPORT_2026-10-21_PIN5_CH1.md)。
 
 ## 当前版本
 
@@ -25,10 +25,10 @@
 
 ## 实测结论（均上板实测，非纸面）
 
-- `live_hardware_test.py` 全套 **100% PASS**：8 档采样率绝对时基校验、硬件电平触发、8192 满载上传（~1.0 MB/s 净吞吐）
+- `tools/host/live_hardware_test.py` 全套 **100% PASS**：8 档采样率绝对时基校验、硬件电平触发、8192 满载上传（~1.0 MB/s 净吞吐）
 - 高频自测波：50 MHz @100MSa/s（2 点/周期严格 1010）、25 MHz @4 点、10 MHz @10 点等 6 项沿数与理论值精确吻合
 - 稳定性：6 组高频配置 × 60 轮 = 360 次捕获 **0 失败**
-- 详细数据见 `PERFORMANCE_REPORT.md` §2.1 / §2.1b
+- 详细数据见 `docs/reports/PERFORMANCE_REPORT.md` §2.1 / §2.1b
 
 - **2026-10-12 夜 烧录 + 冒烟测试**（`tools/smoke_test.py`，板载实跑；首轮 18/18，定速修复后终版 **19/19 PASS**）：
   - 烧录：位流 22368B @0x80034000、固件 24768B @0x80000000（终版已重烧对齐仓库 commit `62f7375`），DAPLink OpenOCD 写入 + verify 通过；重启后 COM33 重新枚举、SUMP ID `1ALS` 应答正常
@@ -47,10 +47,10 @@
 ```bash
 pio run -e logic_analyzer -t upload      # 只改 C：编译 + DAPLink 烧录（不重建 logic）
 pio run -e logic_analyzer -t prelogic    # 改 .ve：先重新生成 logic 工程
-python live_hardware_test.py             # 上板回归（COM33；需 PIN_5↔任一 CH 跳线，自测方波源已改 PIN_5）
+python tools/host/live_hardware_test.py  # 上板回归（COM33；需 PIN_5↔任一 CH 跳线，自测方波源已改 PIN_5）
 python tools/smoke_test.py COM33         # 烧录后冒烟（项数随接线变化；PIN_5 单线为 24 项）
 python tools/loopback_test.py COM33      # 板级回环（需 PIN_10↔PIN_11 跳线；DAC 全波形闭环，18 项）
-# 最新 PIN_5 -> CH1 实测报告：TEST_REPORT_2026-10-21_PIN5_CH1.md
+# 最新 PIN_5 -> CH1 实测报告：docs/reports/TEST_REPORT_2026-10-21_PIN5_CH1.md
 # 改 .ve 必须三段式：prelogic → logic/run_quartus_steps.bat → logic/run_supra.bat → -t logic + -t upload
 #   ★ 勿用 run_quartus.tcl / execute_flow（本机 Quartus 收尾 fast-fail 会被误判为失败，见下节）
 ```
@@ -58,7 +58,7 @@ python tools/loopback_test.py COM33      # 板级回环（需 PIN_10↔PIN_11 �
 ## 交接注意事项 / 待办
 
 - **⚠️ Quartus 环境问题（2026-10-12 排查，影响本机所有 logic 编译）**：Quartus II 13.0sp1 命令行工具（map/cdb/fit/sta/eda）在本机**总会完整完成工作并写出 "Successful" 报告，但进程收尾阶段以 Windows fast-fail（退出码 `0xC0000409` STATUS_STACK_BUFFER_OVERRUN）退出**——stdout 缓冲未刷新，造成日志"中途截断"的假象；`run_quartus.tcl`（execute_flow 一键流程）在 map 后误报 `Error (293007) ... ended unexpectedly` 而中止。**对策**：改用 `logic/run_quartus_steps.bat`——分步执行同一流程（忽略退出码），以各步 `quartus_logs\*.summary` 报告为准；2026-10-12 从零实测全链通过（Quartus 六步 + Supra，0 errors）。已用"改动前配置"对照复现同一现象，**与设计源码无关**；如将来 Quartus 环境修复（重装/换机），可直接回到 `run_quartus.tcl`。
-- 本轮 3 个提交（`94f8b3f` / `d1818b3` / `62f7375` + 本文档提交）**均未推送**；`benchmark_usb.py` 及根目录若干散件仍未 git 跟踪（历史遗留）
+- 板级测试脚本已统一归档到 `tools/host/`，历史日志归档到 `tools/logs/`
 - PulseView GUI 实际抓取未实证（协议层 SUMP 已实测）；边沿触发使用 SUMP 非标准位（mask bit4 → ctrl bit12）扩展实现
 - 50 MHz 自测波处于 100 MSa/s 奈奎斯特边缘（2 点/周期），数字级验证通过，但波形形态需示波器确认
 - 换引脚自测波/采样通道时：改 `logic_board.ve` 的 PIN 声明，需重走三段式并重烧 logic；避开 PIN_24/25(JTAG)、PIN_22/23(USB DM/DP)、PIN_1(晶振)

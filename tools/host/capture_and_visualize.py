@@ -86,7 +86,7 @@ def main():
 
     print_ascii_waveform(samples, length=80)
     
-    output_path = Path(__file__).resolve().with_name("capture.vcd")
+    output_path = Path.cwd() / "capture.vcd"
     export_vcd(samples, str(output_path))
     print(f"\nExported standard VCD waveform to {output_path} (Ready for PulseView / GTKWave).")
 

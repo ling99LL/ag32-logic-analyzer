@@ -75,7 +75,7 @@ for idx, (ch_name, sig, color) in enumerate(channels):
     svg.append(f'<path d="{" ".join(path)}" fill="none" stroke="{color}" stroke-width="2.5" stroke-linejoin="round" />')
 
 svg.append('</svg>')
-svg_out = Path(__file__).resolve().with_name('plan_b_live_waveform.svg')
+svg_out = Path(__file__).resolve().parents[2] / 'docs' / 'images' / 'plan_b_live_waveform.svg'
 with open(svg_out, 'w', encoding='utf-8') as f:
     f.write('\n'.join(svg))
 print('Live SVG updated successfully:', svg_out)
