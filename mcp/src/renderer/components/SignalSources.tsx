@@ -82,14 +82,14 @@ export function SignalSources({
 
   return (
     <div className="source-stack">
-      <section className="control-section">
+      <section className="source-panel digital-source">
         <div className="section-heading">
           <span className="section-icon digital"><Radio size={16} /></span>
           <div>
             <h2>数字输出 PIN_5</h2>
             <p>数字方波或触发/脉冲引擎</p>
           </div>
-          <StatusDot active={Boolean(device.pin5)} />
+          <span className={device.pin5 ? "source-state active" : "source-state"}><i />{device.pin5?.outputHigh ? "HIGH" : "LOW"}</span>
         </div>
 
         <Segmented
@@ -238,14 +238,15 @@ export function SignalSources({
         )}
       </section>
 
-      <section className="control-section">
+      <section className="source-panel analog-source">
         <div className="section-heading">
           <span className="section-icon analog"><Activity size={16} /></span>
           <div>
             <h2>模拟输出 PIN_11</h2>
             <p>10 bit DAC0 · DMA 循环波表</p>
           </div>
-          <StatusDot active={Boolean(device.info?.flags && device.info.flags & 1)} />
+          <span className={device.info?.flags && device.info.flags & 1 ? "source-state active" : "source-state"}><i />
+            {device.info?.flags && device.info.flags & 1 ? "输出中" : "已关闭"}</span>
         </div>
 
         <FieldLabel label="波形" />
@@ -396,10 +397,6 @@ export function Segmented({
       ))}
     </div>
   );
-}
-
-function StatusDot({ active }: { active: boolean }) {
-  return <span className={active ? "source-status active" : "source-status"} title={active ? "输出已配置" : "输出未启用"} />;
 }
 
 function WavePreview({ waveform }: { waveform: WaveType }) {

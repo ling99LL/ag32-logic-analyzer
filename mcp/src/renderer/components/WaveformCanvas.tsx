@@ -4,10 +4,10 @@ import type { CaptureFrame, ChannelName } from "../../shared/types.js";
 import { formatTime } from "../format.js";
 
 const CHANNEL_COLORS: Record<ChannelName, string> = {
-  CH1: "#55d6be",
-  CH2: "#f3ba63",
-  CH3: "#ec7eaa",
-  CH4: "#9ccf62",
+  CH1: "#157ad6",
+  CH2: "#e09a16",
+  CH3: "#9a5ac7",
+  CH4: "#159776",
 };
 
 const CHANNEL_LABELS: Record<ChannelName, string> = {
@@ -50,14 +50,6 @@ export function WaveformCanvas({ frame, visibility }: Props) {
     setCursor(null);
   }, [frame?.id]);
 
-  const [themeRevision, setThemeRevision] = useState(0);
-
-  useEffect(() => {
-    const observer = new MutationObserver(() => setThemeRevision((revision) => revision + 1));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-    return () => observer.disconnect();
-  }, []);
-
   useEffect(() => {
     if (!wrapperRef.current) return;
     const observer = new ResizeObserver(([entry]) => {
@@ -73,7 +65,7 @@ export function WaveformCanvas({ frame, visibility }: Props) {
 
   useEffect(() => {
     drawWaveform(canvasRef.current, samples, frame, visibility, viewport, size, cursor);
-  }, [cursor, frame, samples, size, viewport, visibility, themeRevision]);
+  }, [cursor, frame, samples, size, viewport, visibility]);
 
   const visibleChannels = (Object.keys(visibility) as ChannelName[]).filter(
     (channel) => visibility[channel],
@@ -106,10 +98,9 @@ export function WaveformCanvas({ frame, visibility }: Props) {
   return (
     <div className="waveform-shell">
       <div className="waveform-toolbar">
-        <div className="waveform-summary">
-          <span className="eyebrow">波形视图</span>
-          <strong>{frame ? formatTime((frame.sampleCount / frame.actualSampleRateHz) * 1e9) : "等待采集"}</strong>
-          {frame && <span>{frame.actualSampleRateHz.toLocaleString()} Sa/s</span>}
+        <div className="waveform-summary"><span>时间窗口</span>
+          <strong>{frame ? formatTime((frame.sampleCount / frame.actualSampleRateHz) * 1e9) : "--"}</strong>
+          {frame && <span>{formatTime((frame.sampleCount / frame.actualSampleRateHz) * 1e9 / 10)} / div</span>}
         </div>
         <div className="toolbar-actions">
           {cursorTimeNs !== null && (
@@ -205,19 +196,19 @@ function drawWaveform(
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   const styles = getComputedStyle(document.documentElement);
   const theme = (name: string, fallback: string): string => styles.getPropertyValue(name).trim() || fallback;
-  const waveBackground = theme("--wave-bg", "#121512");
-  const waveGrid = theme("--wave-grid", "#2a312a");
-  const waveTrack = theme("--wave-track", "#242b25");
-  const waveText = theme("--wave-text", "#d7e8de");
-  const waveMuted = theme("--wave-muted", "#7e8a7f");
-  const waveformTrigger = theme("--amber", "#f3ba63");
-  const waveformCursor = theme("--wave-cursor", "rgba(238, 244, 239, 0.65)");
+  const waveBackground = theme("--wave-bg", "#ffffff");
+  const waveGrid = theme("--wave-grid", "#e9edf3");
+  const waveTrack = theme("--wave-track", "#edf0f5");
+  const waveText = theme("--wave-text", "#263244");
+  const waveMuted = theme("--wave-muted", "#8992a3");
+  const waveformTrigger = theme("--amber", "#dd7f22");
+  const waveformCursor = theme("--wave-cursor", "rgba(37, 50, 68, 0.5)");
   context.fillStyle = waveBackground;
   context.fillRect(0, 0, size.width, size.height);
 
   const left = 78;
   const right = 18;
-  const top = 26;
+  const top = 34;
   const bottom = 30;
   const plotWidth = Math.max(10, size.width - left - right);
   const plotHeight = Math.max(10, size.height - top - bottom);
@@ -231,7 +222,7 @@ function drawWaveform(
   context.font = '11px "Cascadia Mono", "Consolas", monospace';
   context.fillStyle = waveMuted;
   const durationNs = frame ? (frame.sampleCount / frame.actualSampleRateHz) * 1e9 : 0;
-  const tickCount = plotWidth < 420 ? 3 : plotWidth < 900 ? 5 : 7;
+  const tickCount = plotWidth < 420 ? 2 : plotWidth < 900 ? 5 : 7;
   for (let index = 0; index <= tickCount; index += 1) {
     const x = left + (plotWidth * index) / tickCount;
     context.beginPath();
@@ -245,6 +236,10 @@ function drawWaveform(
       const textX = Math.max(left + 2, Math.min(x + 4, left + plotWidth - textWidth - 2));
       context.fillText(label, textX, 16);
     }
+  }
+  for (let index = 0; index <= 8; index += 1) {
+    const y = top + (plotHeight * index) / 8;
+    context.beginPath(); context.moveTo(left, y + 0.5); context.lineTo(left + plotWidth, y + 0.5); context.stroke();
   }
 
   visible.forEach((channel, channelIndex) => {

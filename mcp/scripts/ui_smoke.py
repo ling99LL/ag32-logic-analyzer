@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import re
 import threading
 from functools import partial
 from pathlib import Path
@@ -26,7 +27,7 @@ def main() -> None:
             page.on("pageerror", lambda error: errors.append(f"pageerror: {error}"))
             page.on("console", lambda message: errors.append(f"console: {message.text}") if message.type == "error" else None)
             page.goto(url, wait_until="networkidle")
-            page.get_by_role("heading", name="采样与触发").wait_for()
+            page.get_by_role("heading", name="逻辑分析仪", exact=True).wait_for()
 
             canvas_stats = page.locator("canvas").evaluate(
                 """canvas => {
@@ -34,7 +35,7 @@ def main() -> None:
                     const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
                     let nonBackground = 0;
                     for (let i = 0; i < data.length; i += 16) {
-                        if (data[i] > 28 || data[i + 1] > 32 || data[i + 2] > 28) nonBackground += 1;
+                        if (data[i] < 235 || data[i + 1] < 235 || data[i + 2] < 235) nonBackground += 1;
                     }
                     return {width: canvas.width, height: canvas.height, nonBackground};
                 }
@@ -47,27 +48,36 @@ def main() -> None:
             page.wait_for_timeout(500)
             page.screenshot(path=str(OUT / "analyzer-1440.png"), full_page=True)
 
-            for theme in ["slate", "light", "ember", "graphite"]:
-                page.get_by_role("button", name="选择界面主题").click()
-                page.get_by_role("menuitemradio").filter(has_text={
-                    "slate": "冷蓝",
-                    "light": "极光",
-                    "ember": "暖碳",
-                    "graphite": "石墨青",
-                }[theme]).click()
-                page.wait_for_timeout(120)
-                if page.locator("html").get_attribute("data-theme") != theme:
-                    raise RuntimeError(f"Theme was not applied: {theme}")
-                if page.evaluate("localStorage.getItem('ag32.theme')") != theme:
-                    raise RuntimeError(f"Theme was not persisted: {theme}")
-                page.screenshot(path=str(OUT / f"theme-{theme}-1440.png"), full_page=True)
-                page.get_by_role("button", name="历史记录").click()
-                page.wait_for_timeout(80)
-                page.screenshot(path=str(OUT / f"theme-{theme}-history.png"), full_page=True)
-                page.get_by_role("button", name="波形分析").click()
+            if page.evaluate("getComputedStyle(document.documentElement).backgroundColor") != "rgb(245, 246, 250)":
+                raise RuntimeError("The light workspace background was not applied")
+            page.get_by_role("button", name="边沿", exact=True).click()
+            page.get_by_text("任一所选边沿成立即触发").wait_for()
+            page.get_by_role("button", name="立即", exact=True).click()
+            page.get_by_role("button", name="重复采集", exact=True).click()
+            page.get_by_text("实时采集 · 20 FPS").wait_for()
+            page.get_by_role("button", name="停止", exact=True).click()
+
+            page.get_by_role("button", name="信号输出", exact=True).click()
+            page.get_by_role("heading", name="数字输出 PIN_5").wait_for()
+            page.get_by_role("button", name="应用数字方波").click()
+            page.get_by_role("button", name="触发引擎", exact=True).click()
+            page.get_by_role("button", name="布防", exact=True).click()
+            page.get_by_role("button", name="三角", exact=True).click()
+            page.get_by_role("button", name="应用模拟波形").click()
+            page.screenshot(path=str(OUT / "outputs-1440.png"), full_page=True)
 
             page.get_by_role("button", name="历史记录").click()
             page.get_by_role("heading", name="历史记录").wait_for()
+            page.locator(".history-table tbody tr").first.wait_for()
+            page.get_by_role("textbox", name="搜索历史记录").fill("desktop")
+            if page.locator(".history-table tbody tr").count() != 1:
+                raise RuntimeError("History search did not filter the saved frame")
+            page.get_by_role("textbox", name="搜索历史记录").fill("")
+            page.get_by_role("button", name="收藏记录", exact=True).first.click()
+            page.get_by_role("button", name="已收藏", exact=True).click()
+            if page.locator(".history-table tbody tr").count() != 1:
+                raise RuntimeError("Favorite history filter did not work")
+            page.get_by_role("button", name=re.compile("全部记录")).click()
             page.screenshot(path=str(OUT / "history-1440.png"), full_page=True)
 
             page.set_viewport_size({"width": 1024, "height": 768})
@@ -78,6 +88,13 @@ def main() -> None:
             page.set_viewport_size({"width": 390, "height": 844})
             page.wait_for_timeout(250)
             page.screenshot(path=str(OUT / "analyzer-390.png"), full_page=True)
+            if page.evaluate("document.documentElement.scrollWidth > innerWidth"):
+                overflow = page.evaluate("""[...document.querySelectorAll('*')]
+                    .filter(e => e.getBoundingClientRect().right > innerWidth + 1)
+                    .map(e => ({tag: e.tagName, cls: e.className, right: e.getBoundingClientRect().right}))""")
+                raise RuntimeError(f"Mobile layout has horizontal page overflow: {overflow}")
+            page.get_by_role("button", name="信号输出", exact=True).click()
+            page.screenshot(path=str(OUT / "outputs-390.png"), full_page=True)
             browser.close()
     finally:
         if server:

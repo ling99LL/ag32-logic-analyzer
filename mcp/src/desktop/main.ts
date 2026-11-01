@@ -30,7 +30,7 @@ function createWindow(): void {
     height: 940,
     minWidth: 1040,
     minHeight: 700,
-    backgroundColor: "#171b18",
+    backgroundColor: "#f6f7fb",
     title: APP_NAME,
     show: false,
     autoHideMenuBar: true,
