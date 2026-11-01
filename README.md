@@ -1,30 +1,65 @@
-# AG32VF303 四通道逻辑分析仪
+# AG32 Logic Studio
 
-用 AG32VF303 内部的 CPLD 做 4 路硬件同步采样，MCU 负责 SUMP/OLS 协议和 USB CDC。设备既可以直接用 PulseView 打开，也可以使用本仓库提供的 **AG32 Logic Studio** 桌面上位机。
+### AG32VF303 四通道逻辑分析仪与信号发生器
 
-板子上另外带一路数字方波/脉冲输出和一路 DAC 波形输出，调试采样器、做触发测试或者给外部电路提供测试信号都比较方便。
+<p>
+  <a href="https://github.com/ling99LL/ag32-logic-analyzer/releases/tag/v0.1.2"><img alt="Release" src="https://img.shields.io/badge/release-v0.1.2-5266d7"></a>
+  <img alt="Windows" src="https://img.shields.io/badge/platform-Windows-22936f">
+  <img alt="SUMP OLS" src="https://img.shields.io/badge/protocol-SUMP%20%2F%20OLS-d58b20">
+  <img alt="MCP" src="https://img.shields.io/badge/integration-MCP-9a5ac7">
+</p>
+
+使用 AG32VF303 内部 CPLD 完成 4 路硬件同步采样，MCU 通过 USB CDC 提供 SUMP/OLS 协议。既可以直接使用 PulseView，也可以使用全新的 **AG32 Logic Studio** 浅色桌面上位机；桌面端与 MCP 共享同一个串口后台，人工看波形时 AI 仍可发起采集和调整输出。
+
+<p align="center">
+  <a href="mcp/docs/images/ag32-logic-studio.png"><img src="mcp/docs/images/ag32-logic-studio.png" alt="AG32 Logic Studio v0.1.2 浅色工作台" width="980"></a>
+</p>
+
+<p align="center"><sub>AG32 Logic Studio v0.1.2 · 四通道浅色波形工作台、硬件触发与通道测量</sub></p>
+
+## 下载 AG32 Logic Studio v0.1.2
+
+| 版本 | 适用方式 | 文件 |
+|---|---|---|
+| **EXE 安装包** | 按向导安装，创建桌面与开始菜单快捷方式 | [AG32 Logic Studio-0.1.2-x64-setup.exe](https://github.com/ling99LL/ag32-logic-analyzer/releases/download/v0.1.2/AG32.Logic.Studio-0.1.2-x64-setup.exe) |
+| **便携版 ZIP** | 解压后直接运行，不在系统安装 | [AG32 Logic Studio-0.1.2-x64-portable.zip](https://github.com/ling99LL/ag32-logic-analyzer/releases/download/v0.1.2/AG32.Logic.Studio-0.1.2-x64-portable.zip) |
+
+Windows 10/11 x64。安装包暂未签名，首次运行时 Windows SmartScreen 可能要求确认。便携版的数据保存在解压目录下的 `data\`。
+
+## 一个工作台，三条调试路径
+
+**波形分析** 将采样率、深度、预触发和触发设置集中在顶部；下方保留大面积 Canvas 波形、缩放、拖动、时间光标和四通道统计。支持立即触发、电平触发、边沿触发，以及单次采集和可开关的重复采集。
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="mcp/docs/images/ag32-logic-studio-outputs.png"><img src="mcp/docs/images/ag32-logic-studio-outputs.png" alt="AG32 Logic Studio 信号输出页面" width="460"></a><br>
+      <sub><b>信号输出</b> · PIN_5 数字激励与 PIN_11 DAC 波形独立配置</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="mcp/docs/images/ag32-logic-studio-history.png"><img src="mcp/docs/images/ag32-logic-studio-history.png" alt="AG32 Logic Studio 历史记录页面" width="460"></a><br>
+      <sub><b>历史档案</b> · 收藏、搜索、VCD 导出和 2 GB 容量管理</sub>
+    </td>
+  </tr>
+</table>
+
+| 能力 | 当前实现 |
+|---|---|
+| 采样 | `4 CH`、最高 `100 MSa/s`、`10 ns` 时间分辨率、最高 `8192` 点 |
+| 触发 | 立即、电平、任意通道上升/下降沿，支持 `0–90%` 预触发 |
+| 并发调试 | 桌面端与 MCP 共用 `ag32d`；命令事务优先、MCP 优先、采集帧级让出 |
+| 数字输出 | `PIN_5`：1 Hz 至 100 MHz 方波，或延时/主机触发电平与脉冲引擎 |
+| 模拟输出 | `PIN_11`：DAC 正弦、方波、锯齿、三角波，以及关闭/静态低/静态高 |
+| 历史记录 | 最近 100 帧内存预览；持久记录、收藏、VCD 导出与自动清理 |
+| 桌面体验 | 浅色仪器工作台、四页工作流、窄窗口响应式布局与安全空闲 |
+
+> PulseView 需要独占串口，不能与桌面端或 MCP 同时采集。切换工具前先断开当前连接。
 
 <p align="center">
   <img src="hardware/images/prototype-board-closeup.jpg" alt="AG32VF303 四通道逻辑分析仪实物" width="760">
 </p>
 
-<p align="center"><sub>AG32VF303 QFN32 主控，4 路输入、数字输出、DAC 输出和 USB-C 集成在一块板上，透明上盖可以直接看到调试接口和状态指示。</sub></p>
-
-## AG32 Logic Studio 桌面端
-
-AG32 Logic Studio 把四通道采集、触发、测量、历史记录和两路信号输出放在同一个桌面工作区。桌面上位机与 MCP 通过共享 `ag32d` 串口后台同时工作，人工看波形时 AI 仍可修改信号源或发起采集。
-
-<p align="center">
-  <a href="mcp/docs/images/ag32-logic-studio.png"><img src="mcp/docs/images/ag32-logic-studio.png" alt="AG32 Logic Studio 桌面端界面" width="980"></a>
-</p>
-
-<p align="center"><sub>四通道 Canvas 波形、硬件触发、边沿测量、PIN_5/PIN_11 输出控制和 MCP 并发调试</sub></p>
-
-- 立即、电平、单通道上升/下降沿触发，支持预触发位置。
-- 最近 100 帧实时预览，手动和 MCP 采集自动写入持久历史。
-- VCD 导出、收藏、2 GB 历史上限和内存/磁盘占用统计。
-- PIN_5 方波与电平/脉冲引擎，PIN_11 DAC 四种波形及静态输出。
-- Windows 安装包和便携 ZIP 从 [最新 Release](https://github.com/ling99LL/ag32-logic-analyzer/releases/latest) 下载。
+<p align="center"><sub>AG32VF303 QFN32 主控，4 路输入、数字输出、DAC 输出和 USB-C 集成在一块板上。</sub></p>
 
 ## 主要参数
 

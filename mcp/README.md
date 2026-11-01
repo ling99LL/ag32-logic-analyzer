@@ -2,8 +2,10 @@
 
 AG32 Logic Studio 是 AG32VF303 四通道逻辑分析仪的桌面端、本机串口后台和 MCP 适配器。桌面端与 MCP 通过同一个 `ag32d` 后台访问已烧录设备，不包含构建、烧录或 JTAG 功能。
 
+当前版本 **v0.1.2**：[EXE 安装包](https://github.com/ling99LL/ag32-logic-analyzer/releases/download/v0.1.2/AG32.Logic.Studio-0.1.2-x64-setup.exe) · [便携 ZIP](https://github.com/ling99LL/ag32-logic-analyzer/releases/download/v0.1.2/AG32.Logic.Studio-0.1.2-x64-portable.zip) · [Release Notes](https://github.com/ling99LL/ag32-logic-analyzer/releases/tag/v0.1.2)
+
 <p align="center">
-  <img src="docs/images/ag32-logic-studio.png" alt="AG32 Logic Studio 桌面端" width="960">
+  <a href="docs/images/ag32-logic-studio.png"><img src="docs/images/ag32-logic-studio.png" alt="AG32 Logic Studio 浅色工作台" width="960"></a>
 </p>
 
 ## Pin map
