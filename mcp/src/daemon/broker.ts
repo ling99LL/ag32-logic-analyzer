@@ -88,6 +88,7 @@ interface DeviceContext {
 interface CaptureResult {
   frame: CaptureFrame;
   hostReadyAt: string;
+  hostRequestAt: string;
   hostStartAt: string;
   hostCompleteAt: string;
 }
@@ -253,6 +254,7 @@ export class DaemonBroker {
       activeDeviceId: this.activeDeviceId,
       device: active?.state ?? emptyDeviceState(),
       repeat: active?.repeatState ?? emptyRepeatState(),
+      repeats: [...this.devices.values()].map((context) => context.repeatState),
       clients: [...this.clients.values()].map(({ id, role, name }) => ({ id, role, name })),
       latestCapture: active?.latestCapture ?? this.synchronizedCapture?.frames[0]?.frame ?? null,
       latestCaptures: [...this.devices.values()]
@@ -578,7 +580,8 @@ export class DaemonBroker {
         true,
         () => this.captureFromRequest(context, role, request, role === "mcp"),
       )));
-    const started = Math.min(...results.map((result) => Date.parse(result.hostStartAt)));
+    const requestStarted = Math.min(...results.map((result) =>
+      Date.parse(result.hostRequestAt)));
     const completed = Math.max(...results.map((result) => Date.parse(result.hostCompleteAt)));
     const createdAt = new Date().toISOString();
     const entries: SynchronizedCaptureEntry[] = results.map((result) => ({
@@ -586,6 +589,7 @@ export class DaemonBroker {
       alias: result.frame.deviceAlias ?? "",
       frame: result.frame,
       hostReadyAt: result.hostReadyAt,
+      hostRequestAt: result.hostRequestAt,
       hostStartAt: result.hostStartAt,
       hostCompleteAt: result.hostCompleteAt,
     }));
@@ -596,11 +600,11 @@ export class DaemonBroker {
       syncMode: "software",
       hardwareSynchronized: false,
       maxStartSkewMs: Math.max(...results.map((result) =>
-        Math.abs(Date.parse(result.hostStartAt) - started))),
-      durationMs: completed - started,
+        Math.abs(Date.parse(result.hostRequestAt) - requestStarted))),
+      durationMs: completed - requestStarted,
       request,
       frames: entries,
-      note: "主机并行启动并读取；各设备仍由自身采样时钟计时。严格时序比较需要公共外部触发和公共参考时钟。",
+      note: "偏差只表示主机发出采集请求的时间差，不代表设备真实触发偏差。各设备仍由自身采样时钟计时；严格时序比较需要公共外部触发和公共参考时钟。",
     };
     this.synchronizedCapture = group;
     this.broadcast({ event: "group_capture", data: group });
@@ -617,7 +621,7 @@ export class DaemonBroker {
     const capturePriority = context.currentJobPriority ?? this.priority(role);
     const active: ActiveCapture = { priority: capturePriority, abort: null, yieldTimer: null };
     const hostReadyAt = new Date().toISOString();
-    const hostStartAt = new Date().toISOString();
+    const hostRequestAt = new Date().toISOString();
     const result = await context.session.capture(
       {
         sampleRateHz: request.sampleRateHz,
@@ -687,7 +691,8 @@ export class DaemonBroker {
     return {
       frame,
       hostReadyAt,
-      hostStartAt,
+      hostRequestAt,
+      hostStartAt: hostRequestAt,
       hostCompleteAt: new Date().toISOString(),
     };
   }

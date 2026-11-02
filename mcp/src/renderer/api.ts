@@ -7,3 +7,7 @@ export type RendererApi = Ag32DesktopApi & {
 
 export const api: RendererApi = window.ag32 ?? createMockApi();
 export const isMockMode = !window.ag32;
+
+if (isMockMode) {
+  window.__ag32MockInvoke = api.invoke.bind(api);
+}

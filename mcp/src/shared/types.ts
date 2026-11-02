@@ -173,6 +173,7 @@ export interface AppSnapshot {
   activeDeviceId: string | null;
   device: DeviceState;
   repeat: RepeatState;
+  repeats: RepeatState[];
   clients: ClientState[];
   latestCapture: CaptureFrame | null;
   latestCaptures: CaptureFrame[];
@@ -186,6 +187,8 @@ export interface SynchronizedCaptureEntry {
   alias: string;
   frame: CaptureFrame;
   hostReadyAt: string;
+  hostRequestAt: string;
+  /** @deprecated Compatibility alias. This timestamp is the host request time. */
   hostStartAt: string;
   hostCompleteAt: string;
 }

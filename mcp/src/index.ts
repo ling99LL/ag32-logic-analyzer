@@ -190,6 +190,7 @@ server.tool(
         deviceId: entry.deviceId,
         alias: entry.alias,
         hostReadyAt: entry.hostReadyAt,
+        hostRequestAt: entry.hostRequestAt,
         hostStartAt: entry.hostStartAt,
         hostCompleteAt: entry.hostCompleteAt,
         frame: summarizeFrame(entry.frame),

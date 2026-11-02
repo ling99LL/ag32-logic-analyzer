@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Activity,
+  AlertTriangle,
   CircleOff,
   Flame,
   Pause,
@@ -13,21 +14,27 @@ import {
   Zap,
 } from "lucide-react";
 import type {
-  AppSettings,
   DeviceState,
   Pin5EngineConfig,
   Pin11Config,
   WaveType,
 } from "../../shared/types.js";
 import { formatFrequency } from "../format.js";
+import type { OutputDraft } from "../output.js";
 
 interface Props {
-  settings: AppSettings;
+  draft: OutputDraft;
   device: DeviceState;
   disabled: boolean;
-  updateSettings: (recipe: (current: AppSettings) => AppSettings) => void;
+  hardwareChanged: boolean;
+  draftDirty: boolean;
+  pin5Dirty: boolean;
+  pin11Dirty: boolean;
+  updateDraft: (recipe: (current: OutputDraft) => OutputDraft) => void;
+  onReloadHardware: () => void;
   configurePin5Square: (frequencyHz: number) => void;
   configurePin5Engine: (config: Pin5EngineConfig) => void;
+  controlPin5Engine: (action: "arm" | "fire" | "reset") => void;
   configurePin11: (config: Pin11Config) => void;
   configurePin11Static: (mode: 0 | 1 | 2) => void;
 }
@@ -47,41 +54,52 @@ const PIN5_MODES: Array<{ value: Pin5EngineConfig["mode"]; label: string }> = [
 ];
 
 export function SignalSources({
-  settings,
+  draft,
   device,
   disabled,
-  updateSettings,
+  hardwareChanged,
+  draftDirty,
+  pin5Dirty,
+  pin11Dirty,
+  updateDraft,
+  onReloadHardware,
   configurePin5Square,
   configurePin5Engine,
+  controlPin5Engine,
   configurePin11,
   configurePin11Static,
 }: Props) {
-  const [pin5Source, setPin5Source] = useState<"square" | "engine">(
-    device.pin5?.squareSelected === false ? "engine" : "square",
-  );
   const [squareUnit, setSquareUnit] = useState<"Hz" | "kHz" | "MHz">("kHz");
   const [delayUnit, setDelayUnit] = useState<"us" | "ms" | "s">("ms");
   const [widthUnit, setWidthUnit] = useState<"us" | "ms" | "s">("ms");
   const [pin11Unit, setPin11Unit] = useState<"Hz" | "kHz" | "MHz">("kHz");
   const [rateCapMhz, setRateCapMhz] = useState(
-    ((settings.pin11.rateCapHz ?? 5_000_000) / 1e6).toFixed(1),
+    ((draft.pin11.rateCapHz ?? 5_000_000) / 1e6).toFixed(1),
   );
 
-  const engine = settings.pin5Engine;
-  const pin11 = settings.pin11;
-  const pin11Limit = pin11RateLimit(settings.pin11.rateCapHz ?? 5_000_000, pin11.waveform);
+  const pin5 = draft.pin5;
+  const engine = pin5.engine;
+  const pin11 = draft.pin11;
+  const pin11Limit = pin11RateLimit(pin11.rateCapHz ?? 5_000_000, pin11.waveform);
 
   useEffect(() => {
-    if (device.pin5?.squareSelected === false) setPin5Source("engine");
-    if (device.pin5?.squareSelected === true) setPin5Source("square");
-  }, [device.pin5?.squareSelected]);
-
-  useEffect(() => {
-    if (settings.pin11.rateCapHz) setRateCapMhz((settings.pin11.rateCapHz / 1e6).toFixed(1));
-  }, [settings.pin11.rateCapHz]);
+    if (pin11.rateCapHz) setRateCapMhz((pin11.rateCapHz / 1e6).toFixed(1));
+  }, [pin11.rateCapHz]);
 
   return (
     <div className="source-stack">
+      {(hardwareChanged || draftDirty) && (
+        <div className={hardwareChanged ? "output-sync-notice changed" : "output-sync-notice pending"} role="status">
+          <AlertTriangle size={16} />
+          <div>
+            <strong>{hardwareChanged ? "硬件状态已由 MCP 或其他客户端更新" : "当前设备有未提交草稿"}</strong>
+            <span>{hardwareChanged
+              ? "下方仍是你此前编辑的本机草稿，不会被外部状态自动覆盖；应用前请确认目标参数。"
+              : "草稿按设备隔离保存，切换设备不会串用其他设备的参数。"}</span>
+          </div>
+          {hardwareChanged && <button className="secondary-button" onClick={onReloadHardware}>载入当前硬件状态</button>}
+        </div>
+      )}
       <section className="source-panel digital-source">
         <div className="section-heading">
           <span className="section-icon digital"><Radio size={16} /></span>
@@ -89,32 +107,40 @@ export function SignalSources({
             <h2>数字输出 PIN_5</h2>
             <p>数字方波或触发/脉冲引擎</p>
           </div>
+          <span className={pin5Dirty ? "source-commit-state pending" : "source-commit-state"}>{pin5Dirty ? "未提交" : "草稿一致"}</span>
           <span className={device.pin5 ? "source-state active" : "source-state"}><i />{device.pin5?.outputHigh ? "HIGH" : "LOW"}</span>
         </div>
 
         <Segmented
-          value={pin5Source}
+          value={pin5.source}
           options={[
             { value: "square", label: "数字方波" },
             { value: "engine", label: "触发引擎" },
           ]}
-          onChange={(value) => setPin5Source(value as "square" | "engine")}
+          onChange={(value) => updateDraft((current) => ({
+            ...current,
+            pin5: { ...current.pin5, source: value as "square" | "engine" },
+          }))}
         />
 
-        {pin5Source === "square" ? (
+        {pin5.source === "square" ? (
           <div className="control-block">
             <FieldLabel icon={<Activity size={13} />} label="频率" />
             <div className="compound-field">
               <input
+                aria-label="PIN_5 频率数值"
                 type="number"
                 min={0.000001}
                 step="any"
-                value={fromNano(settings.pin5SquareHz, squareUnit)}
+                value={fromNano(pin5.squareFrequencyHz, squareUnit)}
                 onChange={(event) => {
                   const value = Number(event.target.value);
-                  updateSettings((current) => ({
+                  updateDraft((current) => ({
                     ...current,
-                    pin5SquareHz: toNano(value, squareUnit),
+                    pin5: {
+                      ...current.pin5,
+                      squareFrequencyHz: toNano(value, squareUnit),
+                    },
                   }));
                 }}
               />
@@ -133,7 +159,7 @@ export function SignalSources({
             <button
               className="primary-button full"
               disabled={disabled}
-              onClick={() => configurePin5Square(settings.pin5SquareHz)}
+              onClick={() => configurePin5Square(pin5.squareFrequencyHz)}
             >
               <Zap size={15} />
               应用数字方波
@@ -176,6 +202,7 @@ export function SignalSources({
             <FieldLabel icon={<Timer size={13} />} label="延时" />
             <div className="compound-field">
               <input
+                aria-label="PIN_5 延时"
                 type="number"
                 min={0}
                 step="any"
@@ -192,6 +219,7 @@ export function SignalSources({
             <FieldLabel label="脉宽" />
             <div className="compound-field">
               <input
+                aria-label="PIN_5 脉宽"
                 type="number"
                 min={0}
                 step="any"
@@ -210,15 +238,15 @@ export function SignalSources({
                 <Send size={14} />
                 应用
               </button>
-              <button className="secondary-button" disabled={disabled} onClick={() => configurePin5Engine({ ...engine, action: "arm" })}>
+              <button className="secondary-button" title={pin5Dirty ? "请先应用当前 PIN_5 引擎配置" : "布防当前引擎配置"} disabled={disabled || pin5Dirty} onClick={() => controlPin5Engine("arm")}>
                 <Play size={14} />
                 布防
               </button>
-              <button className="secondary-button" disabled={disabled} onClick={() => configurePin5Engine({ ...engine, action: "fire" })}>
+              <button className="secondary-button" title={pin5Dirty ? "请先应用当前 PIN_5 引擎配置" : "触发当前引擎配置"} disabled={disabled || pin5Dirty} onClick={() => controlPin5Engine("fire")}>
                 <Flame size={14} />
                 触发
               </button>
-              <button className="icon-button bordered" title="复位触发引擎" disabled={disabled} onClick={() => configurePin5Engine({ ...engine, action: "reset" })}>
+              <button className="icon-button bordered" title={pin5Dirty ? "请先应用当前 PIN_5 引擎配置" : "复位触发引擎"} disabled={disabled || pin5Dirty} onClick={() => controlPin5Engine("reset")}>
                 <RotateCcw size={15} />
               </button>
             </div>
@@ -245,6 +273,7 @@ export function SignalSources({
             <h2>模拟输出 PIN_11</h2>
             <p>10 bit DAC0 · DMA 循环波表</p>
           </div>
+          <span className={pin11Dirty ? "source-commit-state pending" : "source-commit-state"}>{pin11Dirty ? "未提交" : "草稿一致"}</span>
           <span className={device.info?.flags && device.info.flags & 1 ? "source-state active" : "source-state"}><i />
             {device.info?.flags && device.info.flags & 1 ? "输出中" : "已关闭"}</span>
         </div>
@@ -266,6 +295,7 @@ export function SignalSources({
         <FieldLabel icon={<Activity size={13} />} label="频率" />
         <div className="compound-field">
           <input
+            aria-label="PIN_11 频率数值"
             type="number"
             min={0.001}
             step="any"
@@ -286,6 +316,7 @@ export function SignalSources({
         </div>
         <input
           className="range-input"
+          aria-label="PIN_11 幅度"
           type="range"
           min={1}
           max={100}
@@ -298,6 +329,7 @@ export function SignalSources({
           <FieldLabel label="采样率上限" />
           <div className="compound-field">
             <input
+              aria-label="PIN_11 采样率上限"
               type="number"
               min={0.001526}
               step="0.1"
@@ -350,16 +382,20 @@ export function SignalSources({
   );
 
   function updateEngine(patch: Partial<Pin5EngineConfig>): void {
-    updateSettings((current) => ({
+    updateDraft((current) => ({
       ...current,
-      pin5Engine: { ...current.pin5Engine, ...patch },
+      pin5: {
+        ...current.pin5,
+        source: "engine",
+        engine: { ...current.pin5.engine, ...patch, action: undefined },
+      },
     }));
   }
 
   function updatePin11(patch: Partial<Pin11Config>): void {
-    updateSettings((current) => ({
+    updateDraft((current) => ({
       ...current,
-      pin11: { ...current.pin11, ...patch },
+      pin11: { ...current.pin11, ...patch, mode: "waveform" },
     }));
   }
 }

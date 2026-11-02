@@ -28,9 +28,14 @@ test("daemon accepts desktop and MCP clients through a shared local pipe", async
     const mcp = new DaemonClient({ role: "mcp", name: "test mcp", autoStart: false });
     await desktop.connect();
     await mcp.connect();
-    const snapshot = await desktop.request<{ clients: unknown[]; device: { connected: boolean } }>("snapshot");
+    const snapshot = await desktop.request<{
+      clients: unknown[];
+      device: { connected: boolean };
+      repeats: unknown[];
+    }>("snapshot");
     assert.equal(snapshot.device.connected, false);
     assert.equal(snapshot.clients.length, 2);
+    assert.deepEqual(snapshot.repeats, []);
     desktop.close();
     mcp.close();
   } finally {

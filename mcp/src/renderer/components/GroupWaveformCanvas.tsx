@@ -67,12 +67,12 @@ export function GroupWaveformCanvas({ group, visibility }: Props) {
         <div className="group-summary">
           <GitCompareArrows size={15} />
           <strong>{group.frames.length} 台设备联合视图</strong>
-          <span>启动偏差 {group.maxStartSkewMs.toFixed(1)} ms</span>
+          <span>主机请求偏差 {group.maxStartSkewMs.toFixed(1)} ms</span>
           <span className="software-sync-badge">软件同步</span>
         </div>
         <div className="toolbar-actions">
           <span className="group-sync-note" title={group.note}>
-            <Info size={14} />非公共时钟
+            <Info size={14} />非设备触发偏差
           </span>
           <button className="icon-button" title="放大" onClick={() => zoom(0.7)}>
             <ZoomIn size={16} />

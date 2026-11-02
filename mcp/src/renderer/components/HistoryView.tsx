@@ -49,9 +49,10 @@ export function HistoryView(props: Props) {
       <button className="icon-button bordered" title="刷新记录" onClick={props.onRefresh} disabled={loading || busy}>
         {loading ? <LoaderCircle className="spin" size={16} /> : <Clock3 size={16} />}</button></div></div>
     <div className="history-table-wrap"><table className="history-table"><thead><tr><th>采集时间</th><th>来源</th><th>采样参数</th><th>触发条件</th><th>活动通道</th><th>文件大小</th><th aria-label="操作" /></tr></thead>
-      <tbody>{filtered.map((record) => <tr key={record.id} onDoubleClick={() => props.onLoad(record)}>
+      <tbody>{filtered.map((record) => <tr key={record.id} data-device-id={record.deviceId ?? ""} onDoubleClick={() => props.onLoad(record)}>
         <td><div className="record-time"><button className="record-link" onClick={() => props.onLoad(record)}>{formatDateTime(record.createdAt)}</button><small>{record.id.slice(-12)}</small></div></td>
-        <td><span className={`source-tag ${record.source}`}>{record.source === "mcp" ? "MCP" : "桌面端"}</span></td>
+        <td><span className={`source-tag ${record.source}`}>{record.source === "mcp" ? "MCP" : "桌面端"}</span>
+          {record.deviceAlias && <small className="table-subvalue">{record.deviceAlias}</small>}</td>
         <td><strong className="table-value">{formatFrequency(record.sampleRateHz)}</strong><small className="table-subvalue">{record.sampleCount.toLocaleString()} 点</small></td>
         <td>{triggerLabel(record)}</td>
         <td><div className="active-channels">{record.channels.filter((channel) => channel.edgeCount > 2).map((channel) => <span key={channel.channel} className={channel.channel.toLowerCase()}>{channel.channel}</span>)}

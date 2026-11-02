@@ -64,11 +64,12 @@ export interface Ag32InvokePayloads {
     fps: number;
     request: Omit<CaptureRequest, "persist">;
   };
-  configure_pin5_square: { frequencyHz: number };
-  configure_pin5_engine: Pin5EngineConfig;
-  pin5_engine_control: { action: "arm" | "fire" | "reset" };
-  configure_pin11: Pin11Config;
-  configure_pin11_static: { mode: 0 | 1 | 2 };
+  stop_repeat: { deviceId?: string };
+  configure_pin5_square: { frequencyHz: number; deviceId?: string };
+  configure_pin5_engine: Pin5EngineConfig & { deviceId?: string };
+  pin5_engine_control: { action: "arm" | "fire" | "reset"; deviceId?: string };
+  configure_pin11: Pin11Config & { deviceId?: string };
+  configure_pin11_static: { mode: 0 | 1 | 2; deviceId?: string };
   history_favorite: { id: string; favorite: boolean };
   history_load: { id: string };
   history_delete: { id: string };

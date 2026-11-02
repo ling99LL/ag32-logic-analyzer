@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, AlertTriangle, ArrowUpRight, AudioWaveform, Check, ChevronRight,
   Boxes, Cable, CircleStop, Clock3, Cpu, Database, FolderClock, Gauge, GitCompareArrows,
@@ -11,15 +11,26 @@ import { GroupWaveformCanvas } from "./components/GroupWaveformCanvas.js";
 import { Segmented, SignalSources } from "./components/SignalSources.js";
 import { HistoryView } from "./components/HistoryView.js";
 import { formatBytes, formatFrequency, formatTime, sampleRateChoices } from "./format.js";
+import {
+  cloneOutputDraft,
+  createOutputDraft,
+  outputDomainSignature,
+} from "./output.js";
+import type { OutputDraft, Pin11OutputMode } from "./output.js";
 import type {
-  AppSettings, AppSnapshot, CaptureFrame, ChannelName, DaemonEvent,
-  DeviceListResult, HistoryRecord, Pin11Config, Pin5EngineConfig, StorageUsage,
-  SynchronizedCaptureGroup,
+  AppSettings, AppSnapshot, CaptureFrame, ChannelName, DaemonEvent, DaemonMethod,
+  DeviceListResult, DeviceState, HistoryRecord, Pin11Config, Pin5EngineConfig,
+  RepeatState, StorageUsage, SynchronizedCaptureGroup,
 } from "../shared/types.js";
 import { DEFAULT_SETTINGS } from "../shared/types.js";
 
 type ViewName = "analyzer" | "outputs" | "history";
 type DeviceIndex = 1 | 2 | 3 | 4;
+type AnalyzerMode = "multi" | "single" | "group";
+interface DeviceOutputBaseline {
+  pin5: string;
+  pin11: string;
+}
 const CHANNEL_NAMES: ChannelName[] = ["CH1", "CH2", "CH3", "CH4"];
 const DEVICE_INDEX_BY_PORT_KEY = "ag32.deviceIndexByPort";
 const PORT_BY_DEVICE_SLOT_KEY = "ag32.portByDeviceSlot";
@@ -40,7 +51,12 @@ export default function App() {
   const [portBySlot, setPortBySlot] = useState<Record<DeviceIndex, string>>(loadPortBySlot);
   const [connectingSlot, setConnectingSlot] = useState<DeviceIndex | null>(null);
   const [groupCapture, setGroupCapture] = useState<SynchronizedCaptureGroup | null>(null);
-  const [groupView, setGroupView] = useState(false);
+  const [analyzerMode, setAnalyzerMode] = useState<AnalyzerMode>("single");
+  const [historyFrame, setHistoryFrame] = useState<CaptureFrame | null>(null);
+  const [outputDeviceId, setOutputDeviceId] = useState<string | null>(null);
+  const [outputDrafts, setOutputDrafts] = useState<Record<string, OutputDraft>>({});
+  const [outputSubmitted, setOutputSubmitted] = useState<Record<string, OutputDraft>>({});
+  const [outputBaselines, setOutputBaselines] = useState<Record<string, DeviceOutputBaseline>>({});
   const [view, setView] = useState<ViewName>("analyzer");
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -49,15 +65,59 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const eventRef = useRef<(event: DaemonEvent) => void>(() => undefined);
+  const previousDeviceCountRef = useRef(0);
   const busy = busyCount > 0;
   const connected = Boolean(snapshot?.device.connected);
   const connectedDevices = snapshot?.devices ?? [];
   const mcpClient = snapshot?.clients.find((client) => client.role === "mcp");
-  const repeatActive = Boolean(snapshot?.repeat.active);
   const storage = snapshot?.storage ?? null;
+  const deviceIdsKey = connectedDevices.map((device) => device.deviceId).join("|");
+  const framesByDevice = useMemo(() => {
+    const frames = new Map<string, CaptureFrame>();
+    for (const frame of snapshot?.latestCaptures ?? []) {
+      if (frame.deviceId) frames.set(frame.deviceId, frame);
+    }
+    if (latestCapture?.deviceId) frames.set(latestCapture.deviceId, latestCapture);
+    return frames;
+  }, [latestCapture, snapshot?.latestCaptures]);
+  const repeatsByDevice = useMemo(() => {
+    const repeats = new Map<string, RepeatState>();
+    for (const repeat of snapshot?.repeats ?? (snapshot?.repeat ? [snapshot.repeat] : [])) {
+      if (repeat.deviceId) repeats.set(repeat.deviceId, repeat);
+    }
+    return repeats;
+  }, [snapshot?.repeat, snapshot?.repeats]);
   const activeCapture = snapshot?.latestCaptures.find(
     (frame) => frame.deviceId === snapshot.activeDeviceId,
   ) ?? (latestCapture?.deviceId === snapshot?.activeDeviceId ? latestCapture : null);
+  const displayFrame = historyFrame ?? activeCapture;
+  const activeRepeat = repeatsByDevice.get(snapshot?.activeDeviceId ?? "");
+  const repeatActive = Boolean(activeRepeat?.active);
+  const activeRepeatCount = [...repeatsByDevice.values()].filter((repeat) => repeat.active).length;
+  const selectedOutputDevice = connectedDevices.find(
+    (device) => device.deviceId === outputDeviceId,
+  ) ?? connectedDevices[0] ?? EMPTY_DEVICE;
+  const selectedOutputDraft = outputDrafts[selectedOutputDevice.deviceId]
+    ?? createOutputDraft(settings, selectedOutputDevice);
+  const selectedHardwareBaseline = outputBaselines[selectedOutputDevice.deviceId];
+  const selectedHardwareChanged = Boolean(selectedOutputDevice.deviceId)
+    && Boolean(selectedHardwareBaseline)
+    && (
+      selectedHardwareBaseline.pin5 !== pin5HardwareFingerprint(selectedOutputDevice)
+      || selectedHardwareBaseline.pin11 !== pin11HardwareFingerprint(selectedOutputDevice)
+    );
+  const selectedSubmittedDraft = outputSubmitted[selectedOutputDevice.deviceId];
+  const selectedPin5Dirty = Boolean(selectedSubmittedDraft)
+    && outputDomainSignature(selectedOutputDraft, "pin5")
+      !== outputDomainSignature(selectedSubmittedDraft, "pin5");
+  const selectedPin11Dirty = Boolean(selectedSubmittedDraft)
+    && outputDomainSignature(selectedOutputDraft, "pin11")
+      !== outputDomainSignature(selectedSubmittedDraft, "pin11");
+  const selectedDraftDirty = selectedPin5Dirty || selectedPin11Dirty;
+  const selectedDirtyDomains = [
+    selectedPin5Dirty ? "PIN_5" : null,
+    selectedPin11Dirty ? "PIN_11" : null,
+  ].filter((domain): domain is string => Boolean(domain));
 
   useEffect(() => {
     eventRef.current = (event: DaemonEvent) => {
@@ -68,8 +128,9 @@ export default function App() {
       } else if (event.event === "group_capture") {
         const group = event.data as SynchronizedCaptureGroup;
         setGroupCapture(group);
-        setGroupView(true);
-        setNotice(`联合采集完成：${group.frames.length} 台设备，启动偏差 ${group.maxStartSkewMs.toFixed(1)} ms`);
+        setAnalyzerMode("group");
+        setHistoryFrame(null);
+        setNotice(`联合采集完成：${group.frames.length} 台设备，主机请求偏差 ${group.maxStartSkewMs.toFixed(1)} ms`);
       } else if (event.event === "snapshot") {
         const next = event.data as AppSnapshot;
         setSnapshot(next);
@@ -112,6 +173,62 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [settings, settingsLoaded]);
 
+  useEffect(() => {
+    const devices = snapshot?.devices ?? [];
+    const previousCount = previousDeviceCountRef.current;
+    const count = devices.length;
+    if (count === 0) {
+      setAnalyzerMode("single");
+    } else if (count === 1 && previousCount === 0) {
+      setAnalyzerMode("single");
+    } else if (count > previousCount && count > 1 && !historyFrame) {
+      setAnalyzerMode("multi");
+    }
+    previousDeviceCountRef.current = count;
+  }, [deviceIdsKey, historyFrame]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    const devices = snapshot?.devices ?? [];
+    setOutputDrafts((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const device of devices) {
+        if (!next[device.deviceId]) {
+          next[device.deviceId] = createOutputDraft(settings, device);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+    setOutputSubmitted((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const device of devices) {
+        if (!next[device.deviceId]) {
+          next[device.deviceId] = createOutputDraft(settings, device);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+    setOutputBaselines((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const device of devices) {
+        if (!next[device.deviceId]) {
+          next[device.deviceId] = deviceOutputBaseline(device);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+    setOutputDeviceId((current) =>
+      current && devices.some((device) => device.deviceId === current)
+        ? current
+        : devices[0]?.deviceId ?? null);
+  }, [deviceIdsKey, settingsLoaded]);
+
   useEffect(() => { if (view === "history") void refreshHistory(); }, [view]);
   useEffect(() => {
     if (!notice && !error) return;
@@ -127,6 +244,7 @@ export default function App() {
       setSnapshot(initialSnapshot);
       setLatestCapture(initialSnapshot.latestCapture);
       setGroupCapture(initialSnapshot.synchronizedCapture);
+      setAnalyzerMode(initialSnapshot.devices.length > 1 ? "multi" : "single");
       setSettings({ ...DEFAULT_SETTINGS, ...savedSettings });
       setSettingsLoaded(true);
       await scanDevices();
@@ -149,14 +267,18 @@ export default function App() {
   async function connect(): Promise<void> {
     await operation(async () => {
       await api.invoke("connect", { port: selectedPort, deviceIndex });
-      setSnapshot(await api.invoke<AppSnapshot>("snapshot"));
+      const next = await api.invoke<AppSnapshot>("snapshot");
+      setSnapshot(next);
+      setAnalyzerMode(next.devices.length > 1 ? "multi" : "single");
       setNotice(`已连接 ${selectedPort}，设备 ${deviceIndex} 点亮 LED${deviceIndex}`);
     });
   }
   async function disconnect(): Promise<void> {
     await operation(async () => {
       await api.invoke("disconnect", { deviceId: snapshot?.activeDeviceId });
-      setSnapshot(await api.invoke<AppSnapshot>("snapshot"));
+      const next = await api.invoke<AppSnapshot>("snapshot");
+      setSnapshot(next);
+      if (next.devices.length < 2) setAnalyzerMode("single");
       setNotice("设备已断开");
     });
   }
@@ -194,7 +316,9 @@ export default function App() {
     setConnectingSlot(index);
     try {
       await api.invoke("connect", { port, deviceIndex: index });
-      setSnapshot(await api.invoke<AppSnapshot>("snapshot"));
+      const next = await api.invoke<AppSnapshot>("snapshot");
+      setSnapshot(next);
+      setAnalyzerMode(next.devices.length > 1 ? "multi" : "single");
       setNotice(`设备 ${index} 已连接：${port}，点亮 LED${index}`);
     } catch (failure) {
       setError(errorText(failure));
@@ -205,7 +329,9 @@ export default function App() {
   async function disconnectSlot(deviceId: string): Promise<void> {
     await operation(async () => {
       await api.invoke("disconnect", { deviceId });
-      setSnapshot(await api.invoke<AppSnapshot>("snapshot"));
+      const next = await api.invoke<AppSnapshot>("snapshot");
+      setSnapshot(next);
+      if (next.devices.length < 2) setAnalyzerMode("single");
       setNotice("设备已断开");
     });
   }
@@ -213,7 +339,7 @@ export default function App() {
     await operation(async () => {
       await api.invoke("set_active_device", { deviceId });
       setSnapshot(await api.invoke<AppSnapshot>("snapshot"));
-      setGroupView(false);
+      setHistoryFrame(null);
     });
   }
   async function chooseDeviceIndex(next: DeviceIndex): Promise<void> {
@@ -234,13 +360,18 @@ export default function App() {
     }
   }
   async function captureOnce(): Promise<void> {
+    await captureDevice(snapshot?.activeDeviceId ?? undefined);
+  }
+  async function captureDevice(deviceId?: string): Promise<void> {
+    if (!deviceId) return;
     await operation(async () => {
-      setGroupView(false);
-      setLatestCapture(await api.invoke<CaptureFrame>("capture", {
-        deviceId: snapshot?.activeDeviceId ?? undefined,
+      const frame = await api.invoke<CaptureFrame>("capture", {
+        deviceId,
         sampleRateHz: settings.sampleRateHz, sampleCount: settings.sampleCount,
         pretriggerPercent: settings.pretriggerPercent, trigger: buildTrigger(settings), persist: true,
-      }));
+      });
+      setLatestCapture(frame);
+      setHistoryFrame(null);
     });
   }
   async function captureSynchronized(): Promise<void> {
@@ -257,20 +388,26 @@ export default function App() {
         },
       });
       setGroupCapture(group);
-      setGroupView(true);
+      setAnalyzerMode("group");
+      setHistoryFrame(null);
       setSnapshot(await api.invoke<AppSnapshot>("snapshot"));
-      setNotice(`联合采集完成：${group.frames.length} 台，软件启动偏差 ${group.maxStartSkewMs.toFixed(1)} ms`);
+      setNotice(`联合采集完成：${group.frames.length} 台，主机请求偏差 ${group.maxStartSkewMs.toFixed(1)} ms`);
     });
   }
   async function toggleRepeat(): Promise<void> {
+    await toggleRepeatForDevice(snapshot?.activeDeviceId ?? undefined);
+  }
+  async function toggleRepeatForDevice(deviceId?: string): Promise<void> {
+    if (!deviceId) return;
     await operation(async () => {
-      if (repeatActive) await api.invoke("stop_repeat");
+      if (repeatsByDevice.get(deviceId)?.active) await api.invoke("stop_repeat", { deviceId });
       else await api.invoke("start_repeat", {
-        deviceId: snapshot?.activeDeviceId ?? undefined,
+        deviceId,
         fps: settings.repeatFps,
         request: { sampleRateHz: settings.sampleRateHz, sampleCount: settings.sampleCount,
           pretriggerPercent: settings.pretriggerPercent, trigger: buildTrigger(settings) },
       });
+      setSnapshot(await api.invoke<AppSnapshot>("snapshot"));
     });
   }
   async function safeIdle(): Promise<void> {
@@ -293,12 +430,9 @@ export default function App() {
   }
   async function loadHistory(record: HistoryRecord): Promise<void> {
     await operation(async () => {
-      setLatestCapture(await api.invoke<CaptureFrame>("history_load", { id: record.id }));
-      if (record.deviceId && snapshot?.devices.some((device) => device.deviceId === record.deviceId)) {
-        await api.invoke("set_active_device", { deviceId: record.deviceId });
-        setSnapshot(await api.invoke<AppSnapshot>("snapshot"));
-      }
-      setGroupView(false);
+      const frame = await api.invoke<CaptureFrame>("history_load", { id: record.id });
+      setHistoryFrame(frame);
+      setAnalyzerMode("single");
       setView("analyzer");
     });
   }
@@ -321,6 +455,82 @@ export default function App() {
   }
   function updateSettings(recipe: (current: AppSettings) => AppSettings): void {
     setSettings((current) => recipe(current));
+  }
+  function updateOutputDraft(
+    deviceId: string,
+    recipe: (current: OutputDraft) => OutputDraft,
+  ): void {
+    setOutputDrafts((current) => ({
+      ...current,
+      [deviceId]: recipe(
+        current[deviceId]
+          ?? createOutputDraft(
+            settings,
+            connectedDevices.find((device) => device.deviceId === deviceId) ?? EMPTY_DEVICE,
+          ),
+      ),
+    }));
+  }
+  function reloadOutputFromDevice(deviceId: string): void {
+    const device = connectedDevices.find((item) => item.deviceId === deviceId);
+    if (!device) return;
+    const next = createOutputDraft(settings, device);
+    setOutputDrafts((current) => ({ ...current, [deviceId]: next }));
+    setOutputSubmitted((current) => ({
+      ...current,
+      [deviceId]: cloneOutputDraft(next),
+    }));
+    setOutputBaselines((current) => ({
+      ...current,
+      [deviceId]: deviceOutputBaseline(device),
+    }));
+    setNotice(`已载入 ${device.alias} 的当前硬件状态`);
+  }
+  async function runOutputCommand(
+    deviceId: string,
+    method: DaemonMethod,
+    params: Record<string, unknown>,
+    commit?: (
+      draft: OutputDraft,
+      submitted: OutputDraft,
+    ) => { draft: OutputDraft; submitted: OutputDraft },
+    successMessage = "输出参数已应用",
+  ): Promise<void> {
+    await operation(async () => {
+      const device = await api.invoke<DeviceState>(method, { ...params, deviceId });
+      if (commit) {
+        const baseDraft = outputDrafts[deviceId] ?? createOutputDraft(settings, device);
+        const baseSubmitted = outputSubmitted[deviceId] ?? cloneOutputDraft(baseDraft);
+        const result = commit(
+          cloneOutputDraft(baseDraft),
+          cloneOutputDraft(baseSubmitted),
+        );
+        setOutputDrafts((current) => ({ ...current, [deviceId]: result.draft }));
+        setOutputSubmitted((current) => ({
+          ...current,
+          [deviceId]: result.submitted,
+        }));
+      }
+      setSnapshot((current) => current
+        ? mergeDeviceIntoSnapshot(current, device)
+        : current);
+      const domain = method === "configure_pin11" || method === "configure_pin11_static"
+        ? "pin11"
+        : "pin5";
+      setOutputBaselines((current) => {
+        const baseline = current[deviceId] ?? deviceOutputBaseline(device);
+        return {
+          ...current,
+          [deviceId]: {
+            ...baseline,
+            [domain]: domain === "pin5"
+              ? pin5HardwareFingerprint(device)
+              : pin11HardwareFingerprint(device),
+          },
+        };
+      });
+      setNotice(`${device.alias} ${successMessage}`);
+    });
   }
   function updateLevelChannel(channel: ChannelName, enabled: boolean, high: boolean): void {
     updateSettings((current) => {
@@ -393,7 +603,13 @@ export default function App() {
                 const device = connectedDevices.find((item) => item.deviceIndex === index);
                 const active = device?.deviceId === snapshot?.activeDeviceId;
                 const port = device?.port ?? portBySlot[index] ?? "";
-                return <article className={active ? "device-slot active" : device ? "device-slot connected" : "device-slot"} key={index}>
+                const deviceRepeat = device ? repeatsByDevice.get(device.deviceId) : null;
+                return <article
+                  className={active ? "device-slot active" : device ? "device-slot connected" : "device-slot"}
+                  data-device-index={index}
+                  data-device-id={device?.deviceId ?? ""}
+                  key={index}
+                >
                   <div className="device-slot-head">
                     <span className={`led-indicator led-${index}`} title={`设备 ${index} 点亮 LED${index}`}>
                       <i />LED{index}
@@ -408,6 +624,7 @@ export default function App() {
                     </button>
                     <div className="device-slot-actions">
                       <span className={active ? "active-device-label" : ""}>{active ? <><Link2 size={13} />当前设备</> : "点击切换"}</span>
+                      {deviceRepeat?.active && <span className="device-repeat-label"><i />采集中</span>}
                       <button className="icon-button danger" title={`断开设备 #${index}`} onClick={() => void disconnectSlot(device.deviceId)} disabled={busy}>
                         <Unplug size={15} />
                       </button>
@@ -447,7 +664,7 @@ export default function App() {
             <div className="capture-controls"><button className="capture-button" disabled={!connected || busy} onClick={() => void captureOnce()}><CircleStop size={16} />采集一帧</button>
               <button className={repeatActive ? "repeat-button active" : "repeat-button"} disabled={!connected || busy} onClick={() => void toggleRepeat()}>
                 {repeatActive ? <Pause size={16} /> : <Play size={16} />}{repeatActive ? "停止" : "重复采集"}</button></div>
-              <button className={groupView ? "sync-capture-button active" : "sync-capture-button"} disabled={connectedDevices.length < 2 || busy} onClick={() => void captureSynchronized()}>
+              <button className={analyzerMode === "group" ? "sync-capture-button active" : "sync-capture-button"} disabled={connectedDevices.length < 2 || busy} onClick={() => void captureSynchronized()}>
                 <GitCompareArrows size={16} />联合采集
               </button>
               <select className="fps-select" aria-label="重复采集帧率" title="重复采集帧率" value={settings.repeatFps} onChange={(event) => updateSettings((current) => ({ ...current, repeatFps: Number(event.target.value) }))}>
@@ -469,56 +686,241 @@ export default function App() {
                 <Segmented compact value={edge?.direction ?? "off"} options={[{ value: "off", label: "关闭" }, { value: "rising", label: "上升沿" }, { value: "falling", label: "下降沿" }]} onChange={(value) => updateEdgeChannel(channel, value)} /></div>;
             })}</div>
           </section>}
-          <section className="waveform-section"><div className="waveform-heading"><div className="channel-legend">
-            {CHANNEL_NAMES.map((channel) => <label key={channel} className={`channel-toggle ${channel.toLowerCase()} ${settings.channelVisibility[channel] ? "active" : ""}`}>
-              <input type="checkbox" checked={settings.channelVisibility[channel]} onChange={(event) => updateSettings((current) => ({ ...current, channelVisibility: { ...current.channelVisibility, [channel]: event.target.checked } }))} />
-              <i /><span>{channel}</span><small>PIN_{Number(channel.slice(2)) + 6}</small></label>)}</div>
+          <section className="waveform-section"><div className="waveform-heading">
+            <div className="waveform-heading-main">
+              <div className="analyzer-view-switch" role="group" aria-label="波形显示模式">
+                <button className={analyzerMode === "multi" ? "active" : ""} aria-pressed={analyzerMode === "multi"} onClick={() => {
+                  setHistoryFrame(null);
+                  setAnalyzerMode("multi");
+                }}>
+                  <Boxes size={14} />多设备
+                </button>
+                <button className={analyzerMode === "single" ? "active" : ""} aria-pressed={analyzerMode === "single"} onClick={() => {
+                  setHistoryFrame(null);
+                  setAnalyzerMode("single");
+                }}>
+                  <SquareActivity size={14} />单设备
+                </button>
+                <button className={analyzerMode === "group" ? "active" : ""} aria-pressed={analyzerMode === "group"} disabled={!groupCapture} onClick={() => {
+                  setHistoryFrame(null);
+                  setAnalyzerMode("group");
+                }}>
+                  <GitCompareArrows size={14} />联合视图
+                </button>
+              </div>
+              <div className="channel-legend">
+                {CHANNEL_NAMES.map((channel) => <label key={channel} className={`channel-toggle ${channel.toLowerCase()} ${settings.channelVisibility[channel] ? "active" : ""}`}>
+                  <input type="checkbox" checked={settings.channelVisibility[channel]} onChange={(event) => updateSettings((current) => ({ ...current, channelVisibility: { ...current.channelVisibility, [channel]: event.target.checked } }))} />
+                  <i /><span>{channel}</span><small>PIN_{Number(channel.slice(2)) + 6}</small></label>)}
+              </div>
+            </div>
             <div className="waveform-heading-actions">
-              {groupCapture && <button className={groupView ? "view-toggle active" : "view-toggle"} onClick={() => setGroupView((current) => !current)}>
-                <GitCompareArrows size={14} />{groupView ? "退出联合视图" : "查看联合视图"}
-              </button>}
-              <div className={repeatActive ? "capture-state live" : "capture-state"}><i />{groupView && groupCapture
+              <div className={activeRepeatCount > 0 ? "capture-state live" : "capture-state"}><i />{analyzerMode === "group" && groupCapture
                 ? `联合采集 · ${groupCapture.frames.length} 台`
-                : repeatActive
-                  ? `实时采集 · ${settings.repeatFps} FPS`
-                  : activeCapture
-                    ? `${snapshot?.device.alias ?? "当前设备"} · ${activeCapture.source === "mcp" ? "MCP 采集帧" : "单帧视图"}`
-                    : "等待采集"}</div>
+                : historyFrame
+                  ? `历史波形 · ${historyFrame.deviceAlias ?? historyFrame.deviceId?.slice(-8) ?? "未知设备"}`
+                  : analyzerMode === "multi"
+                    ? `${connectedDevices.length} 台并行 · ${activeRepeatCount > 0 ? `${activeRepeatCount} 台采集中` : "可独立采集"}`
+                    : repeatActive
+                      ? `实时采集 · ${settings.repeatFps} FPS`
+                      : activeCapture
+                        ? `${snapshot?.device.alias ?? "当前设备"} · ${activeCapture.source === "mcp" ? "MCP 采集帧" : "单帧视图"}`
+                        : "等待采集"}</div>
             </div></div>
-            {groupView && groupCapture
+            {analyzerMode === "group" && groupCapture
               ? <GroupWaveformCanvas group={groupCapture} visibility={settings.channelVisibility} />
-              : <WaveformCanvas frame={activeCapture} visibility={settings.channelVisibility} />}</section>
+              : analyzerMode === "multi"
+                ? <div className="device-waveform-grid" data-testid="device-waveform-grid">
+                    {connectedDevices.map((device) => {
+                      const frame = framesByDevice.get(device.deviceId) ?? null;
+                      const deviceRepeat = repeatsByDevice.get(device.deviceId);
+                      return <article
+                        className="device-waveform-card"
+                        data-testid="device-waveform"
+                        data-device-id={device.deviceId}
+                        data-device-index={device.deviceIndex}
+                        data-frame-id={frame?.id ?? ""}
+                        key={device.deviceId}
+                      >
+                        <header className="device-waveform-header">
+                          <div>
+                            <span className={`led-indicator led-${device.deviceIndex ?? 1}`}><i />LED{device.deviceIndex}</span>
+                            <strong>{device.alias}</strong>
+                            <small>{device.port}</small>
+                            <span className={deviceRepeat?.active ? "device-live-state active" : "device-live-state"}><i />{deviceRepeat?.active ? `采集中 · ${deviceRepeat.fps} FPS` : frame ? "最新帧" : "等待采集"}</span>
+                          </div>
+                          <div className="device-waveform-actions">
+                            <button className="icon-button bordered" title={`采集 ${device.alias}`} aria-label={`采集 ${device.alias}`} disabled={busy} onClick={() => void captureDevice(device.deviceId)}>
+                              <CircleStop size={15} />
+                            </button>
+                            <button className={deviceRepeat?.active ? "device-repeat-button active" : "device-repeat-button"} title={`${deviceRepeat?.active ? "停止" : "开始"}重复采集 ${device.alias}`} aria-label={`${deviceRepeat?.active ? "停止" : "开始"}重复采集 ${device.alias}`} disabled={busy} onClick={() => void toggleRepeatForDevice(device.deviceId)}>
+                              {deviceRepeat?.active ? <Pause size={14} /> : <Play size={14} />}{deviceRepeat?.active ? "停止" : "重复"}
+                            </button>
+                          </div>
+                        </header>
+                        <WaveformCanvas frame={frame} visibility={settings.channelVisibility} />
+                      </article>;
+                    })}
+                  </div>
+                : <WaveformCanvas frame={historyFrame ?? activeCapture} visibility={settings.channelVisibility} />}
+          </section>
           <section className="measurements-section"><div className="section-title-row"><div><Activity size={17} /><h2>通道测量</h2></div>
-            <span>{groupView && groupCapture
+            <span>{analyzerMode === "group" && groupCapture
               ? `联合组 ${new Date(groupCapture.createdAt).toLocaleTimeString("zh-CN", { hour12: false })}`
-              : activeCapture
-                ? `${snapshot?.device.alias ?? ""} · ${new Date(activeCapture.createdAt).toLocaleTimeString("zh-CN", { hour12: false })}`
+              : displayFrame
+                ? `${displayFrame.deviceAlias ?? snapshot?.device.alias ?? ""} · ${new Date(displayFrame.createdAt).toLocaleTimeString("zh-CN", { hour12: false })}`
                 : "暂无数据"}</span></div>
             <div className="measurement-table-wrap"><table className="measurement-table"><thead><tr><th>通道</th><th>估算频率</th><th>边沿计数</th><th>高电平占比</th><th>首个边沿</th><th>末个边沿</th></tr></thead>
-              <tbody>{activeCapture?.channels.filter((channel) => settings.channelVisibility[channel.channel]).map((channel) => <tr key={channel.channel}>
+              <tbody>{displayFrame?.channels.filter((channel) => settings.channelVisibility[channel.channel]).map((channel) => <tr key={channel.channel}>
                 <td><span className={`channel-badge ${channel.channel.toLowerCase()}`}>{channel.channel}</span><small>{channel.pin}</small></td>
                 <td>{formatFrequency(channel.estimatedFrequencyHz)}</td><td>{channel.edgeCount.toLocaleString()}</td>
                 <td>{((channel.highCount / (channel.highCount + channel.lowCount)) * 100).toFixed(1)}%</td>
                 <td>{formatTime(channel.firstEdgeTimeNs)}</td><td>{formatTime(channel.lastEdgeTimeNs)}</td></tr>)}</tbody></table>
-              {!activeCapture && <div className="measurement-empty"><ScanLine size={20} />采集一帧后显示通道测量结果</div>}</div>
+              {!displayFrame && <div className="measurement-empty"><ScanLine size={20} />采集一帧后显示通道测量结果</div>}</div>
           </section>
         </main>}
         {view === "outputs" && <main className="outputs-workspace"><div className="outputs-intro"><div><h2>两路独立信号输出</h2>
-          <p>配置数字激励与模拟波形，参数仅在点击应用后写入设备。</p></div>
-          <span className={connected ? "output-device online" : "output-device"}><Radio size={15} />{connected ? `${snapshot?.device.alias} · ${snapshot?.device.port}` : "连接设备后可控制输出"}</span></div>
-          <SignalSources settings={settings} device={snapshot?.device ?? EMPTY_DEVICE} disabled={!connected || busy} updateSettings={updateSettings}
-            configurePin5Square={(frequencyHz) => void operation(() => api.invoke("configure_pin5_square", { deviceId: snapshot?.activeDeviceId, frequencyHz }))}
-            configurePin5Engine={(config: Pin5EngineConfig) => void operation(() => api.invoke("configure_pin5_engine", { ...config, deviceId: snapshot?.activeDeviceId }))}
-            configurePin11={(config: Pin11Config) => void operation(() => api.invoke("configure_pin11", { ...config, deviceId: snapshot?.activeDeviceId }))}
-            configurePin11Static={(mode) => void operation(() => api.invoke("configure_pin11_static", { mode, deviceId: snapshot?.activeDeviceId }))} />
-          <div className="output-footnote"><Check size={15} />退出上位机不会改变当前硬件输出状态。</div></main>}
+          <p>每台设备独立保存未提交参数，点击应用后才会写入对应硬件。</p></div>
+          <span className={connected ? "output-device online" : "output-device"}><Radio size={15} />{connected ? `${connectedDevices.length} 台设备可独立控制` : "连接设备后可控制输出"}</span></div>
+          {connectedDevices.length > 0 ? <>
+            <section className="output-device-selector" aria-label="输出设备选择">
+              <div className="output-device-selector-heading"><div><Boxes size={16} /><strong>设备级输出控制</strong><span>切换标签只切换本机草稿，不改变 daemon 活动设备</span></div></div>
+              <div className="output-device-tabs">
+                {connectedDevices.map((device) => {
+                  const selected = device.deviceId === selectedOutputDevice.deviceId;
+                  const hardwareChanged = deviceOutputHardwareChanged(
+                    outputBaselines[device.deviceId],
+                    device,
+                  );
+                  return <button
+                    className={selected ? "output-device-tab active" : "output-device-tab"}
+                    aria-label={`输出设备 ${device.alias}`}
+                    aria-pressed={selected}
+                    data-device-id={device.deviceId}
+                    onClick={() => setOutputDeviceId(device.deviceId)}
+                    key={device.deviceId}
+                  >
+                    <span className={`output-tab-led led-${device.deviceIndex ?? 1}`}><i /></span>
+                    <span><strong>{device.alias}</strong><small>{device.port}</small></span>
+                    <span className="output-tab-state">
+                      {hardwareChanged ? "硬件已更新" : `PIN_5 ${device.pin5?.outputHigh ? "HIGH" : "LOW"} · PIN_11 ${device.info?.flags && device.info.flags & 1 ? "ON" : "OFF"}`}
+                    </span>
+                  </button>;
+                })}
+              </div>
+            </section>
+            <div className="output-draft-status">
+              <span className={selectedHardwareChanged ? "changed" : selectedDraftDirty ? "pending" : "synced"}><i />
+                {selectedHardwareChanged ? "硬件状态已由 MCP 或其他客户端更新"
+                  : selectedDirtyDomains.length > 0 ? `未提交：${selectedDirtyDomains.join("、")}`
+                    : "当前设备草稿与已应用参数一致"}
+              </span>
+              <small>{selectedOutputDevice.alias} · {selectedOutputDevice.port} · 草稿仅作用于此设备</small>
+            </div>
+            <SignalSources
+              key={selectedOutputDevice.deviceId}
+              draft={selectedOutputDraft}
+              device={selectedOutputDevice}
+              disabled={busy || !selectedOutputDevice.connected}
+              hardwareChanged={selectedHardwareChanged}
+              draftDirty={selectedDraftDirty}
+              pin5Dirty={selectedPin5Dirty}
+              pin11Dirty={selectedPin11Dirty}
+              updateDraft={(recipe) => updateOutputDraft(selectedOutputDevice.deviceId, recipe)}
+              onReloadHardware={() => reloadOutputFromDevice(selectedOutputDevice.deviceId)}
+              configurePin5Square={(frequencyHz) => void runOutputCommand(
+                selectedOutputDevice.deviceId,
+                "configure_pin5_square",
+                { frequencyHz },
+                (draft, submitted) => ({
+                  draft: {
+                    ...draft,
+                    pin5: { ...draft.pin5, source: "square", squareFrequencyHz: frequencyHz },
+                  },
+                  submitted: {
+                    ...submitted,
+                    pin5: { ...submitted.pin5, source: "square", squareFrequencyHz: frequencyHz },
+                  },
+                }),
+                "PIN_5 方波已应用",
+              )}
+              configurePin5Engine={(config: Pin5EngineConfig) => {
+                const engine = { ...config, action: undefined };
+                void runOutputCommand(
+                  selectedOutputDevice.deviceId,
+                  "configure_pin5_engine",
+                  { ...engine },
+                  (draft, submitted) => ({
+                    draft: {
+                      ...draft,
+                      pin5: { ...draft.pin5, source: "engine", engine },
+                    },
+                    submitted: {
+                      ...submitted,
+                      pin5: { ...submitted.pin5, source: "engine", engine },
+                    },
+                  }),
+                  "PIN_5 引擎配置已应用",
+                );
+              }}
+              controlPin5Engine={(action) => void runOutputCommand(
+                selectedOutputDevice.deviceId,
+                "pin5_engine_control",
+                { action },
+                undefined,
+                action === "arm" ? "PIN_5 引擎已布防"
+                  : action === "fire" ? "PIN_5 引擎已触发"
+                    : "PIN_5 引擎已复位",
+              )}
+              configurePin11={(config: Pin11Config) => void runOutputCommand(
+                selectedOutputDevice.deviceId,
+                "configure_pin11",
+                { ...config },
+                (draft, submitted) => ({
+                  draft: {
+                    ...draft,
+                    pin11: { ...config, mode: "waveform" },
+                  },
+                  submitted: {
+                    ...submitted,
+                    pin11: { ...config, mode: "waveform" },
+                  },
+                }),
+                "PIN_11 波形已应用",
+              )}
+              configurePin11Static={(mode) => {
+                const outputMode: Pin11OutputMode = mode === 1
+                  ? "low"
+                  : mode === 2
+                    ? "high"
+                    : "off";
+                void runOutputCommand(
+                  selectedOutputDevice.deviceId,
+                  "configure_pin11_static",
+                  { mode },
+                  (draft, submitted) => ({
+                    draft: {
+                      ...draft,
+                      pin11: { ...draft.pin11, enabled: false, mode: outputMode },
+                    },
+                    submitted: {
+                      ...submitted,
+                      pin11: { ...submitted.pin11, enabled: false, mode: outputMode },
+                    },
+                  }),
+                  "PIN_11 静态输出已应用",
+                );
+              }}
+            />
+          </> : <div className="output-empty"><Radio size={24} /><strong>尚未连接设备</strong><span>连接设备后可分别配置 PIN_5 与 PIN_11。</span></div>}
+          <div className="output-footnote"><Check size={15} />退出上位机不会改变当前硬件输出状态；外部状态变化不会自动覆盖本机草稿。</div></main>}
         {view === "history" && <main className="history-main"><HistoryView records={historyRecords} usage={storage} loading={historyLoading} busy={busy}
           onRefresh={() => void refreshHistory()} onLoad={(record) => void loadHistory(record)}
           onFavorite={(record, favorite) => void favoriteHistory(record, favorite)} onDelete={(record) => void deleteHistory(record)} onOpen={openPath} /></main>}
         <footer className="statusbar"><span className={connected ? "footer-status online" : "footer-status"}><i />{connected ? `${connectedDevices.length} 台 USB CDC 已就绪` : "USB CDC 离线"}</span>
-          <span><Gauge size={13} />{activeCapture ? formatFrequency(activeCapture.actualSampleRateHz) : "--"}</span>
-          <span><Clock3 size={13} />{activeCapture ? formatTime((activeCapture.sampleCount / activeCapture.actualSampleRateHz) * 1e9) : "--"}</span>
-          <span><Database size={13} />{activeCapture?.sampleCount.toLocaleString() ?? "--"} 点</span>
+          <span><Gauge size={13} />{displayFrame ? formatFrequency(displayFrame.actualSampleRateHz) : "--"}</span>
+          <span><Clock3 size={13} />{displayFrame ? formatTime((displayFrame.sampleCount / displayFrame.actualSampleRateHz) * 1e9) : "--"}</span>
+          <span><Database size={13} />{displayFrame?.sampleCount.toLocaleString() ?? "--"} 点</span>
           <span className="footer-spacer" /><span><HardDrive size={13} />缓存 {formatBytes(storage?.totalBytes ?? 0)}</span>
           <span className="footer-message">{error ?? notice ?? snapshot?.activity[0]?.label ?? "系统就绪"}<ArrowUpRight size={12} /></span></footer>
       </div>
@@ -536,6 +938,57 @@ function buildTrigger(settings: AppSettings) {
 }
 function errorText(failure: unknown): string {
   return failure instanceof Error ? failure.message : String(failure);
+}
+
+function pin5HardwareFingerprint(device: DeviceState): string {
+  return JSON.stringify(device.pin5);
+}
+
+function pin11HardwareFingerprint(device: DeviceState): string {
+  return JSON.stringify({
+    pin11Static: device.pin11Static,
+    info: device.info
+      ? {
+          waveform: device.info.waveform,
+          amplitudePercent: device.info.amplitudePercent,
+          requestedFrequencyHz: device.info.requestedFrequencyHz,
+          actualFrequencyHz: device.info.actualFrequencyHz,
+          flags: device.info.flags,
+          rateCapHz: device.info.rateCapHz,
+        }
+      : null,
+  });
+}
+
+function deviceOutputBaseline(device: DeviceState): DeviceOutputBaseline {
+  return {
+    pin5: pin5HardwareFingerprint(device),
+    pin11: pin11HardwareFingerprint(device),
+  };
+}
+
+function deviceOutputHardwareChanged(
+  baseline: DeviceOutputBaseline | undefined,
+  device: DeviceState,
+): boolean {
+  return Boolean(baseline)
+    && (baseline!.pin5 !== pin5HardwareFingerprint(device)
+      || baseline!.pin11 !== pin11HardwareFingerprint(device));
+}
+
+function mergeDeviceIntoSnapshot(snapshot: AppSnapshot, state: DeviceState): AppSnapshot {
+  const devices = snapshot.devices.some((device) => device.deviceId === state.deviceId)
+    ? snapshot.devices.map((device) => device.deviceId === state.deviceId ? state : device)
+    : [...snapshot.devices, state];
+  const activeDeviceId = devices.some((device) => device.deviceId === snapshot.activeDeviceId)
+    ? snapshot.activeDeviceId
+    : devices[0]?.deviceId ?? null;
+  return {
+    ...snapshot,
+    devices,
+    activeDeviceId,
+    device: devices.find((device) => device.deviceId === activeDeviceId) ?? EMPTY_DEVICE,
+  };
 }
 
 function savedDeviceIndex(port: string): DeviceIndex {

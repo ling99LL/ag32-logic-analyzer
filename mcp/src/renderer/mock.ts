@@ -9,6 +9,7 @@ import type {
   DeviceState,
   HistoryRecord,
   Pin11Config,
+  RepeatState,
   SynchronizedCaptureGroup,
 } from "../shared/types.js";
 import { DEFAULT_SETTINGS } from "../shared/types.js";
@@ -18,19 +19,28 @@ export function createMockApi(): Ag32DesktopApi & {
 } {
   const listeners = new Set<(event: DaemonEvent) => void>();
   let settings: AppSettings = { ...DEFAULT_SETTINGS };
-  let repeatTimer: ReturnType<typeof setInterval> | null = null;
+  const repeatTimers = new Map<string, ReturnType<typeof setInterval>>();
+  const repeatStates = new Map<string, RepeatState>();
   let sequence = 0;
   const history: HistoryRecord[] = [];
+  const historyFrames = new Map<string, CaptureFrame>();
   const frames = new Map<string, CaptureFrame>();
   let synchronizedCapture: SynchronizedCaptureGroup | null = null;
   const firstDevice = createDevice(1, "COM33");
   const latestFrame = createFrame(4096, 20_000_000, firstDevice);
   frames.set(firstDevice.deviceId, latestFrame);
+  repeatStates.set(firstDevice.deviceId, {
+    active: false,
+    fps: 20,
+    ownerRole: null,
+    deviceId: firstDevice.deviceId,
+  });
   let snapshot: AppSnapshot = {
     devices: [firstDevice],
     activeDeviceId: firstDevice.deviceId,
     device: firstDevice,
-    repeat: { active: false, fps: 20, ownerRole: null, deviceId: firstDevice.deviceId },
+    repeat: repeatStates.get(firstDevice.deviceId)!,
+    repeats: [repeatStates.get(firstDevice.deviceId)!],
     clients: [
       { id: "desktop-preview", role: "desktop", name: "AG32 Logic Studio" },
       { id: "mcp-preview", role: "mcp", name: "AG32 Logic Studio MCP" },
@@ -70,14 +80,25 @@ export function createMockApi(): Ag32DesktopApi & {
   }
 
   function syncSnapshot(): void {
+    const active = activeDevice();
+    const repeats = snapshot.devices.map((device) =>
+      repeatStates.get(device.deviceId) ?? {
+        active: false,
+        fps: 20,
+        ownerRole: null,
+        deviceId: device.deviceId,
+      });
     snapshot = {
       ...snapshot,
       activeDeviceId: snapshot.devices.some((device) => device.deviceId === snapshot.activeDeviceId)
         ? snapshot.activeDeviceId
         : snapshot.devices[0]?.deviceId ?? null,
-      device: activeDevice(),
+      device: active,
+      repeat: repeats.find((state) => state.deviceId === active.deviceId)
+        ?? { active: false, fps: 20, ownerRole: null, deviceId: active.deviceId },
+      repeats,
       latestCaptures: [...frames.values()],
-      latestCapture: frames.get(activeDevice().deviceId)
+      latestCapture: frames.get(active.deviceId)
         ?? snapshot.latestCapture
         ?? null,
       synchronizedCapture,
@@ -130,6 +151,7 @@ export function createMockApi(): Ag32DesktopApi & {
     frame.persistent = Boolean(request.persist);
     frames.set(device.deviceId, frame);
     if (frame.persistent) {
+      historyFrames.set(frame.id, frame);
       const record: HistoryRecord = {
         id: frame.id,
         deviceId: device.deviceId,
@@ -202,6 +224,12 @@ export function createMockApi(): Ag32DesktopApi & {
             if (snapshot.devices.length >= 4) throw new Error("最多同时连接 4 台设备");
             device = createDevice(index, String(input.port ?? `COM${32 + index}`));
             snapshot.devices.push(device);
+            repeatStates.set(device.deviceId, {
+              active: false,
+              fps: 20,
+              ownerRole: null,
+              deviceId: device.deviceId,
+            });
           }
           if (input.alias) device.alias = String(input.alias);
           device.port = String(input.port ?? device.port);
@@ -213,6 +241,7 @@ export function createMockApi(): Ag32DesktopApi & {
         }
         case "disconnect": {
           const device = resolveDevice(input.deviceId);
+          stopMockRepeat(device.deviceId);
           snapshot.devices = snapshot.devices.filter((item) => item.deviceId !== device.deviceId);
           frames.delete(device.deviceId);
           syncSnapshot();
@@ -220,6 +249,7 @@ export function createMockApi(): Ag32DesktopApi & {
           return { connected: false, deviceId: device.deviceId } as T;
         }
         case "disconnect_all":
+          for (const device of snapshot.devices) stopMockRepeat(device.deviceId);
           snapshot.devices = [];
           frames.clear();
           syncSnapshot();
@@ -263,14 +293,15 @@ export function createMockApi(): Ag32DesktopApi & {
           const started = Date.now();
           const entries = ids.map((id, index) => {
             const device = resolveDevice(id);
-            const hostStartAt = new Date(started + index * 6).toISOString();
+            const hostRequestAt = new Date(started + index * 6).toISOString();
             const frame = capture(request, device);
             return {
               deviceId: device.deviceId,
               alias: device.alias,
               frame,
               hostReadyAt: new Date(started).toISOString(),
-              hostStartAt,
+              hostRequestAt,
+              hostStartAt: hostRequestAt,
               hostCompleteAt: new Date(Date.now() + 120).toISOString(),
             };
           });
@@ -285,7 +316,7 @@ export function createMockApi(): Ag32DesktopApi & {
             durationMs: Date.now() - started + 120,
             request,
             frames: entries,
-            note: "主机并行启动并读取；严格时序比较需要公共外部触发和公共参考时钟。",
+            note: "偏差只表示主机发出采集请求的时间差，不代表设备真实触发偏差。严格时序比较需要公共外部触发和公共参考时钟。",
           };
           syncSnapshot();
           emit({ event: "group_capture", data: synchronizedCapture });
@@ -297,23 +328,24 @@ export function createMockApi(): Ag32DesktopApi & {
         case "start_repeat": {
           const device = resolveDevice(input.deviceId);
           const fps = Math.max(1, Math.min(30, Number(input.fps) || 20));
-          snapshot.repeat = { active: true, fps, ownerRole: "desktop", deviceId: device.deviceId };
-          snapshot.activeDeviceId = device.deviceId;
-          if (repeatTimer) clearInterval(repeatTimer);
-          repeatTimer = setInterval(() => {
+          const repeat = { active: true, fps, ownerRole: "desktop" as const, deviceId: device.deviceId };
+          repeatStates.set(device.deviceId, repeat);
+          const existing = repeatTimers.get(device.deviceId);
+          if (existing) clearInterval(existing);
+          repeatTimers.set(device.deviceId, setInterval(() => {
             capture(input.request as CaptureRequest, device);
-          }, 1000 / fps);
+          }, 1000 / fps));
           syncSnapshot();
           emit({ event: "snapshot", data: snapshot });
-          return snapshot.repeat as T;
+          return repeat as T;
         }
-        case "stop_repeat":
-          if (repeatTimer) clearInterval(repeatTimer);
-          repeatTimer = null;
-          snapshot.repeat = { ...snapshot.repeat, active: false, ownerRole: null };
+        case "stop_repeat": {
+          const device = resolveDevice(input.deviceId);
+          stopMockRepeat(device.deviceId);
           syncSnapshot();
           emit({ event: "snapshot", data: snapshot });
-          return snapshot.repeat as T;
+          return repeatStates.get(device.deviceId) as T;
+        }
         case "configure_pin5_square": {
           const device = resolveDevice(input.deviceId);
           device.pin5 = {
@@ -389,7 +421,7 @@ export function createMockApi(): Ag32DesktopApi & {
           return history as T;
         case "history_load": {
           const record = history.find((item) => item.id === input.id);
-          return (record ? frames.get(record.deviceId ?? "") ?? activeFrame() : activeFrame()) as T;
+          return (record ? historyFrames.get(record.id) ?? activeFrame() : activeFrame()) as T;
         }
         case "history_favorite": {
           const record = history.find((item) => item.id === input.id);
@@ -399,6 +431,7 @@ export function createMockApi(): Ag32DesktopApi & {
         case "history_delete": {
           const index = history.findIndex((item) => item.id === input.id);
           if (index >= 0) history.splice(index, 1);
+          historyFrames.delete(String(input.id));
           return { deleted: true, id: input.id } as T;
         }
         case "storage_usage":
@@ -430,6 +463,19 @@ export function createMockApi(): Ag32DesktopApi & {
 
   function activeFrame(): CaptureFrame {
     return frames.get(activeDevice().deviceId) ?? latestFrame;
+  }
+
+  function stopMockRepeat(deviceId: string): void {
+    const timer = repeatTimers.get(deviceId);
+    if (timer) clearInterval(timer);
+    repeatTimers.delete(deviceId);
+    const current = repeatStates.get(deviceId);
+    repeatStates.set(deviceId, {
+      active: false,
+      fps: current?.fps ?? 20,
+      ownerRole: null,
+      deviceId,
+    });
   }
 
   function createFrame(

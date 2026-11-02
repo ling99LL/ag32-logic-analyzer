@@ -87,7 +87,7 @@ node C:\Users\Administrator\Documents\AG32\Logic\mcp\dist\index.js
 现有工具名、参数和主要返回语义保持不变。原有工具都允许附加可选 `deviceId`，省略时使用当前活动设备。新增：
 
 - `set_active_device`、`disconnect_all_devices`：切换当前设备或一次断开全部设备。
-- `capture_synchronized`：最多四台设备的主机并行联合采集；明确标记 `syncMode: "software"` 和 `hardwareSynchronized: false`。
+- `capture_synchronized`：最多四台设备的主机并行联合采集；明确标记 `syncMode: "software"` 和 `hardwareSynchronized: false`。`hostRequestAt` 是主机发出请求的时间；`hostStartAt` 仅作为兼容别名保留。`maxStartSkewMs` 表示主机请求偏差，不是设备真实触发偏差。
 - `safe_idle`：PIN_11 关闭，PIN_5 停止翻转并输出低电平。
 - `safe_idle_all`：对全部已连接设备执行安全空闲。
 - `get_latest_capture`：读取桌面端或 MCP 最近一次采集的元数据。
