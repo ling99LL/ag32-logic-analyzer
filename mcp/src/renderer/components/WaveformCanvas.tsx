@@ -140,7 +140,7 @@ export function WaveformCanvas({ frame, visibility }: Props) {
           }}
           onPointerMove={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
-            const plotLeft = 78;
+            const plotLeft = 104;
             const plotRight = 18;
             const plotWidth = Math.max(1, rect.width - plotLeft - plotRight);
             const x = Math.max(0, Math.min(1, (event.clientX - rect.left - plotLeft) / plotWidth));
@@ -206,7 +206,7 @@ function drawWaveform(
   context.fillStyle = waveBackground;
   context.fillRect(0, 0, size.width, size.height);
 
-  const left = 78;
+  const left = 104;
   const right = 18;
   const top = 34;
   const bottom = 30;
@@ -219,7 +219,7 @@ function drawWaveform(
 
   context.strokeStyle = waveGrid;
   context.lineWidth = 1;
-  context.font = '11px "Cascadia Mono", "Consolas", monospace';
+  context.font = '12px "Cascadia Mono", "Consolas", monospace';
   context.fillStyle = waveMuted;
   const durationNs = frame ? (frame.sampleCount / frame.actualSampleRateHz) * 1e9 : 0;
   const tickCount = plotWidth < 420 ? 2 : plotWidth < 900 ? 5 : 7;
@@ -252,10 +252,10 @@ function drawWaveform(
     context.lineTo(left + plotWidth, low + 8);
     context.stroke();
     context.fillStyle = channel === "CH1" ? waveText : waveMuted;
-    context.font = '600 12px "Segoe UI", "Microsoft YaHei", sans-serif';
+    context.font = '600 14px "Segoe UI", "Microsoft YaHei", sans-serif';
     context.fillText(CHANNEL_LABELS[channel], 12, center - 3);
     context.fillStyle = CHANNEL_COLORS[channel];
-    context.fillRect(12, center + 4, 48, 2);
+    context.fillRect(12, center + 5, 66, 2);
   });
 
   if (!frame || samples.length === 0 || visible.length === 0) return;
@@ -302,7 +302,7 @@ function drawWaveform(
     context.stroke();
     context.setLineDash([]);
     context.fillStyle = waveformTrigger;
-    context.font = '10px "Cascadia Mono", "Consolas", monospace';
+    context.font = '11px "Cascadia Mono", "Consolas", monospace';
     context.fillText("TRIGGER", triggerX + 5, top + 12);
   }
 

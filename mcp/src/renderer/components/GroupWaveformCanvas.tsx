@@ -131,7 +131,7 @@ function draw(
   ctx.fillStyle = background;
   ctx.fillRect(0, 0, size.width, size.height);
 
-  const left = 92;
+  const left = 126;
   const right = 18;
   const top = 28;
   const bottom = 24;
@@ -154,7 +154,7 @@ function draw(
       const durationNs = (frame.sampleCount / frame.actualSampleRateHz) * 1e9;
       const time = durationNs * (viewport.start + (viewport.end - viewport.start) * tick / 6);
       ctx.fillStyle = muted;
-      ctx.font = '10px "Cascadia Mono", Consolas, monospace';
+      ctx.font = '12px "Cascadia Mono", Consolas, monospace';
       ctx.fillText(axisLabel(time), x + 4, 15);
     }
   }
@@ -170,10 +170,10 @@ function draw(
       ctx.stroke();
     }
     ctx.fillStyle = text;
-    ctx.font = '600 12px "Segoe UI", "Microsoft YaHei", sans-serif';
+    ctx.font = '600 14px "Segoe UI", "Microsoft YaHei", sans-serif';
     ctx.fillText(entry.alias || entry.frame.deviceAlias || "设备", 10, deviceTop + 19);
     ctx.fillStyle = muted;
-    ctx.font = '9px "Cascadia Mono", Consolas, monospace';
+    ctx.font = '11px "Cascadia Mono", Consolas, monospace';
     ctx.fillText(entry.frame.deviceId?.slice(-13) ?? "", 10, deviceTop + 34);
 
     visibleChannels.forEach((channel, laneIndex) => {
@@ -181,8 +181,8 @@ function draw(
       const high = center - Math.min(13, laneHeight * 0.26);
       const low = center + Math.min(13, laneHeight * 0.26);
       ctx.fillStyle = muted;
-      ctx.font = '9px "Cascadia Mono", Consolas, monospace';
-      ctx.fillText(channel, 61, center + 3);
+      ctx.font = '12px "Cascadia Mono", Consolas, monospace';
+      ctx.fillText(channel, 79, center + 4);
       ctx.strokeStyle = grid;
       ctx.beginPath();
       ctx.moveTo(left, low + 6);

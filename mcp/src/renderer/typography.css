@@ -1,0 +1,77 @@
+/* Readable instrument text. Compact status stays secondary, not microscopic. */
+body { font-size: 14px; }
+.brand-block span, .nav-caption, .version-label { font-size: 11px; }
+.mcp-status strong, .idle-button, .connection-state { font-size: 12px; }
+.mcp-status small, .page-title > span, .port-control select { font-size: 12px; }
+.page-title h1 { font-size: 22px; }
+.primary-button, .secondary-button, .capture-button, .repeat-button { font-size: 13px; }
+.preview-badge { font-size: 12px; }
+
+.device-rack-heading strong, .device-slot-head strong { font-size: 13px; }
+.device-rack-heading span, .device-rack-summary,
+.device-slot-head small, .led-indicator,
+.device-slot-main strong, .device-slot-main small,
+.device-slot-actions > span { font-size: 11px; }
+.device-slot select, .device-connect-button { font-size: 12px; }
+.device-slot select { height: 34px; }
+.device-connect-button { min-height: 34px; }
+
+.parameter-field > label, .pretrigger-field label,
+.parameter-field > select, .fps-select { font-size: 12px; }
+.parameter-field > select { height: 36px; }
+.segmented { height: 36px; }
+.segmented button, .segmented.compact button { font-size: 12px; }
+.segmented.compact { height: 32px; }
+.trigger-settings-title strong { font-size: 14px; }
+.trigger-settings-title span, .check-label { font-size: 12px; }
+.sync-capture-button { min-height: 38px; font-size: 13px; }
+
+.analyzer-view-switch button { min-height: 31px; font-size: 12px; }
+.channel-toggle span { font-size: 12px; }
+.channel-toggle small, .capture-state { font-size: 11px; }
+.waveform-summary, .waveform-summary strong,
+.waveform-summary > span:last-child, .cursor-readout { font-size: 12px; }
+.group-summary, .group-summary strong, .group-summary > span,
+.group-sync-note, .waveform-empty { font-size: 12px; }
+.device-waveform-header strong { font-size: 13px; }
+.device-waveform-header small, .device-live-state { font-size: 11px; }
+.device-repeat-button { min-height: 32px; font-size: 12px; }
+.section-title-row h2 { font-size: 14px; }
+.section-title-row > span, .measurement-table th,
+.measurement-table td, .measurement-table td small,
+.channel-badge, .measurement-empty { font-size: 12px; }
+.statusbar, .footer-status { font-size: 11px; }
+
+.outputs-intro h2 { font-size: 19px; }
+.outputs-intro p, .output-device { font-size: 13px; }
+.output-device-selector-heading strong { font-size: 13px; }
+.output-device-selector-heading span,
+.output-device-tab strong, .output-device-tab small,
+.output-tab-state, .output-draft-status > span,
+.output-draft-status small, .output-sync-notice strong,
+.output-sync-notice span, .output-empty strong, .output-empty span { font-size: 12px; }
+.section-heading h2 { font-size: 16px; }
+.section-heading p, .source-state, .source-commit-state { font-size: 11px; }
+.field-label { font-size: 13px; }
+.compound-field input { font-size: 14px; }
+.compound-field select, .unit-fixed { font-size: 13px; }
+.range-note, .live-status, .live-status strong,
+.wave-choice, .advanced-details summary, .advanced-details p,
+.switch-row strong, .switch-row small, .static-output-row,
+.text-button, .output-footnote { font-size: 12px; }
+.slider-heading strong { font-size: 13px; }
+
+.storage-main span, .storage-detail > span,
+.storage-main small, .storage-detail strong small,
+.storage-detail b, .storage-capacity > div:first-child,
+.storage-capacity p, .storage-capacity > small { font-size: 12px; }
+.history-filters button, .history-filters button span,
+.search-field input, .history-table th, .history-table td,
+.record-link, .record-time small, .table-subvalue,
+.source-tag, .active-channels span, .history-empty p { font-size: 12px; }
+.toast strong { font-size: 14px; }
+.toast span { font-size: 12px; }
+
+@media (max-width: 430px) {
+  .button-row > button { font-size: 12px; }
+}
