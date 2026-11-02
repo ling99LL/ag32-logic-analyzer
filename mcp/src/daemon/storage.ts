@@ -71,6 +71,8 @@ export class CaptureStore {
         const favorite = await pathExists(path.join(directory, "favorite.flag"));
         records.push({
           id: manifest.id,
+          deviceId: manifest.deviceId,
+          deviceAlias: manifest.deviceAlias,
           createdAt: manifest.createdAt,
           source: manifest.source,
           sampleRateHz: manifest.actualSampleRateHz,

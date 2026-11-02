@@ -204,12 +204,25 @@ export async function readPin5StatusFrame(
   return parsePin5StatusFrame(await readResponseFrame(serial, 7, timeoutMs));
 }
 
-export async function listSerialPorts(): Promise<string[]> {
+export async function listSerialPorts(): Promise<Array<{
+  path: string;
+  manufacturer?: string;
+  friendlyName?: string;
+  serialNumber?: string;
+  pnpId?: string;
+  locationId?: string;
+}>> {
   const ports = await SerialPort.list();
-  const preferred = ports
-    .filter((port) => port.path === "COM33" || /usb|cdc|serial/i.test(((port as { friendlyName?: string }).friendlyName ?? "")))
-    .map((port) => port.path);
-  const ordered = new Set<string>(preferred);
-  for (const port of ports) ordered.add(port.path);
-  return [...ordered];
+  const mapped = ports.map((port) => ({
+    path: port.path,
+    manufacturer: port.manufacturer,
+    friendlyName: (port as { friendlyName?: string }).friendlyName,
+    serialNumber: port.serialNumber,
+    pnpId: port.pnpId,
+    locationId: port.locationId,
+  }));
+  const preferred = mapped.filter((port) =>
+    port.path === "COM33" || /usb|cdc|serial/i.test(port.friendlyName ?? ""));
+  const remainder = mapped.filter((port) => !preferred.includes(port));
+  return [...preferred, ...remainder];
 }

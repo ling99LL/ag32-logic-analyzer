@@ -63,6 +63,8 @@
 #include <string.h>
 #include <math.h>
 
+void usb_prepare_serial(void);
+
 // CPLD Hardware Registers
 #define CPLD_REG_CTRL      (*(volatile uint32_t *)0x60000000)
 #define CPLD_REG_STATUS    (*(volatile uint32_t *)0x60000004)
@@ -156,7 +158,7 @@ static void comm_send_byte(uint8_t c);
 static void comm_flush(void);
 
 #define GEN_VER_MAJOR       1
-#define GEN_VER_MINOR       2
+#define GEN_VER_MINOR       3
 #define WAVE_TABLE_MAX      2048
 #define DAC_SAMPLE_RATE     100000000u  /* APB clock: DAC update is 100MHz/(div+1) */
 
@@ -922,6 +924,7 @@ static void config_pin_pulldowns(void) {
 
 int main(void) {
   board_init();
+  usb_prepare_serial();
   config_pin_pulldowns();
   osc_init();
 

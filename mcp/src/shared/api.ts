@@ -10,6 +10,7 @@ import type {
   Pin11Config,
   Pin5EngineConfig,
   StorageUsage,
+  SynchronizedCaptureGroup,
 } from "./types.js";
 
 export interface Ag32DesktopApi {
@@ -21,11 +22,15 @@ export interface Ag32DesktopApi {
 export interface Ag32InvokeMap {
   snapshot: AppSnapshot;
   list_devices: DeviceListResult;
-  connect: { connected: true; port: string; deviceIndex: 1 | 2 | 3 | 4 | null };
-  disconnect: { connected: false };
+  connect: AppSnapshot["device"];
+  disconnect: { connected: false; deviceId: string };
+  disconnect_all: { disconnected: string[] };
+  set_active_device: AppSnapshot["device"];
   set_device_index: AppSnapshot["device"];
   get_device_info: AppSnapshot["device"];
   capture: CaptureFrame;
+  capture_synchronized: SynchronizedCaptureGroup;
+  get_synchronized_capture: SynchronizedCaptureGroup | null;
   start_repeat: AppSnapshot["repeat"];
   stop_repeat: AppSnapshot["repeat"];
   configure_pin5_square: AppSnapshot["device"];
@@ -34,6 +39,7 @@ export interface Ag32InvokeMap {
   configure_pin11: AppSnapshot["device"];
   configure_pin11_static: AppSnapshot["device"];
   safe_idle: AppSnapshot["device"];
+  safe_idle_all: AppSnapshot["device"][];
   history_list: HistoryRecord[];
   history_load: CaptureFrame;
   history_favorite: HistoryRecord;
@@ -45,10 +51,19 @@ export interface Ag32InvokeMap {
 }
 
 export interface Ag32InvokePayloads {
-  connect: { port: string; deviceIndex?: 1 | 2 | 3 | 4 };
+  connect: { port: string; deviceIndex?: 1 | 2 | 3 | 4; alias?: string };
   set_device_index: { deviceIndex: 1 | 2 | 3 | 4 | 0 };
-  capture: CaptureRequest;
-  start_repeat: { fps: number; request: Omit<CaptureRequest, "persist"> };
+  set_active_device: { deviceId: string };
+  capture: CaptureRequest & { deviceId?: string };
+  capture_synchronized: {
+    deviceIds?: string[];
+    request: CaptureRequest;
+  };
+  start_repeat: {
+    deviceId?: string;
+    fps: number;
+    request: Omit<CaptureRequest, "persist">;
+  };
   configure_pin5_square: { frequencyHz: number };
   configure_pin5_engine: Pin5EngineConfig;
   pin5_engine_control: { action: "arm" | "fire" | "reset" };

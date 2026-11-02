@@ -3,7 +3,9 @@
  */
 
 #include "bsp/board_api.h"
+#include "flash.h"
 #include "tusb.h"
+#include <stdio.h>
 
 #define USB_VID   0xCafe
 #define USB_PID   0x4001
@@ -69,11 +71,26 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
 //--------------------------------------------------------------------+
 // String Descriptors
 //--------------------------------------------------------------------+
+static char usb_serial_number[25] = "AG32-LA-UNKNOWN";
+
+void usb_prepare_serial(void) {
+  uint32_t id[4] = {0, 0, 0, 0};
+  FLASH_Unlock();
+  FLASH_GetUniqueID(id);
+  snprintf(
+    usb_serial_number,
+    sizeof(usb_serial_number),
+    "AG32-LA-%08lX%08lX",
+    (unsigned long)id[0],
+    (unsigned long)id[1]
+  );
+}
+
 char const *string_desc_arr[] = {
   (const char[]) { 0x09, 0x04 }, // 0: Supported language English (0x0409)
   "AGM",                         // 1: Manufacturer
   "AG32 Logic Analyzer",         // 2: Product
-  "123456",                      // 3: Serial
+  usb_serial_number,             // 3: Per-chip serial from Flash UID
   "AG32 LA CDC",                 // 4: CDC Interface
 };
 

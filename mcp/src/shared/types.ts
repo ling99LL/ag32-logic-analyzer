@@ -87,6 +87,8 @@ export interface CaptureArtifacts {
 
 export interface CaptureFrame {
   id: string;
+  deviceId?: string;
+  deviceAlias?: string;
   createdAt: string;
   source: ClientRole;
   persistent: boolean;
@@ -104,6 +106,8 @@ export interface CaptureFrame {
 
 export interface HistoryRecord {
   id: string;
+  deviceId?: string;
+  deviceAlias?: string;
   createdAt: string;
   source: ClientRole;
   sampleRateHz: number;
@@ -131,11 +135,17 @@ export interface RepeatState {
   active: boolean;
   fps: number;
   ownerRole: ClientRole | null;
+  deviceId?: string | null;
 }
 
 export interface DeviceState {
+  deviceId: string;
+  alias: string;
+  identity: string;
+  identityStable: boolean;
   connected: boolean;
   port: string | null;
+  connectedAt: string | null;
   info: FirmwareInfo | null;
   pin5: Pin5Status | null;
   pin11Static: 0 | 1 | 2 | null;
@@ -151,6 +161,7 @@ export interface ClientState {
 export interface ActivityItem {
   id: string;
   at: string;
+  deviceId?: string;
   role: ClientRole;
   label: string;
   status: "running" | "ok" | "error";
@@ -158,12 +169,38 @@ export interface ActivityItem {
 }
 
 export interface AppSnapshot {
+  devices: DeviceState[];
+  activeDeviceId: string | null;
   device: DeviceState;
   repeat: RepeatState;
   clients: ClientState[];
   latestCapture: CaptureFrame | null;
+  latestCaptures: CaptureFrame[];
+  synchronizedCapture: SynchronizedCaptureGroup | null;
   activity: ActivityItem[];
   storage: StorageUsage;
+}
+
+export interface SynchronizedCaptureEntry {
+  deviceId: string;
+  alias: string;
+  frame: CaptureFrame;
+  hostReadyAt: string;
+  hostStartAt: string;
+  hostCompleteAt: string;
+}
+
+export interface SynchronizedCaptureGroup {
+  id: string;
+  createdAt: string;
+  deviceIds: string[];
+  syncMode: "software";
+  hardwareSynchronized: false;
+  maxStartSkewMs: number;
+  durationMs: number;
+  request: CaptureRequest;
+  frames: SynchronizedCaptureEntry[];
+  note: string;
 }
 
 export interface Pin5EngineConfig {
@@ -187,6 +224,13 @@ export interface SerialPortInfo {
   path: string;
   manufacturer?: string;
   friendlyName?: string;
+  serialNumber?: string;
+  pnpId?: string;
+  locationId?: string;
+  identity?: string;
+  identityStable?: boolean;
+  connectedDeviceId?: string;
+  connectedAlias?: string;
   sumpId?: boolean;
   firmware?: string;
   deviceIndex?: 1 | 2 | 3 | 4 | null;
@@ -251,9 +295,13 @@ export type DaemonMethod =
   | "list_devices"
   | "connect"
   | "disconnect"
+  | "disconnect_all"
+  | "set_active_device"
   | "set_device_index"
   | "get_device_info"
   | "capture"
+  | "capture_synchronized"
+  | "get_synchronized_capture"
   | "start_repeat"
   | "stop_repeat"
   | "configure_pin5_square"
@@ -262,6 +310,7 @@ export type DaemonMethod =
   | "configure_pin11"
   | "configure_pin11_static"
   | "safe_idle"
+  | "safe_idle_all"
   | "history_list"
   | "history_load"
   | "history_favorite"
@@ -294,6 +343,6 @@ export interface DaemonResponse<T = unknown> {
 }
 
 export interface DaemonEvent<T = unknown> {
-  event: "capture" | "snapshot" | "activity" | "device";
+  event: "capture" | "snapshot" | "activity" | "device" | "group_capture";
   data: T;
 }

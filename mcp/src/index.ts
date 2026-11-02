@@ -21,13 +21,14 @@ import type {
   DeviceState,
   Pin5EngineConfig,
   Pin11Config,
+  SynchronizedCaptureGroup,
 } from "./shared/types.js";
 
 const server = new McpServer(
-  { name: "ag32-logic-studio-mcp", version: "0.1.2" },
+  { name: "ag32-logic-studio-mcp", version: "0.2.0" },
   {
     instructions:
-      "Control the AG32VF303 logic analyzer and signal generator through the shared AG32 Logic Studio daemon. CH1-CH4 are inputs on PIN_7-10. PIN_5 is the digital output and PIN_11 is the DAC analog output. This server does not build or flash firmware.",
+      "Control up to four AG32VF303 logic analyzers and their signal generators through the shared AG32 Logic Studio daemon. Existing tools use the active device unless deviceId is supplied. capture_synchronized coordinates multiple devices from the host and is not a hardware-timed common-trigger capture. CH1-CH4 are inputs on PIN_7-10. PIN_5 is the digital output and PIN_11 is the DAC analog output. This server does not build or flash firmware.",
   },
 );
 
@@ -39,6 +40,8 @@ const daemon = new DaemonClient({
 
 const portSchema = z.string().min(1).describe("Serial port path, for example COM33.");
 const channelSchema = z.enum(["CH1", "CH2", "CH3", "CH4"]);
+const deviceIdSchema = z.string().min(1).optional()
+  .describe("Connected deviceId. Omit it to address the current active device.");
 
 server.tool(
   "list_devices",
@@ -50,25 +53,46 @@ server.tool(
   },
 );
 
-server.tool("connect_device", "Connect to an AG32 Logic USB CDC port and optionally assign its LED identity 1-4.", {
+server.tool("connect_device", "Connect one AG32 Logic USB CDC port. Up to four devices can stay connected; deviceIndex 1-4 also selects the one-hot LED identity.", {
   port: portSchema,
   deviceIndex: z.number().int().min(1).max(4).optional()
     .describe("Optional one-hot LED identity: device 1 lights LED1, device 4 lights LED4."),
-}, async ({ port, deviceIndex }) => {
-  await daemon.request("connect", { port, deviceIndex });
-  const device = await daemon.request<DeviceState>("get_device_info");
-  return textResult({ connected: true, port, deviceIndex: device.deviceIndex, info: device.info, pin5: device.pin5 });
+  alias: z.string().min(1).max(32).optional().describe("Optional human-readable device alias."),
+}, async ({ port, deviceIndex, alias }) => {
+  const device = await daemon.request<DeviceState>("connect", { port, deviceIndex, alias });
+  return textResult(device);
 });
 
-server.tool("disconnect_device", "Close the current AG32 Logic serial connection.", {}, async () => {
-  const result = await daemon.request("disconnect");
+server.tool("disconnect_device", "Close one AG32 Logic serial connection.", {
+  deviceId: deviceIdSchema,
+}, async ({ deviceId }) => {
+  const result = await daemon.request("disconnect", { deviceId });
   return textResult(result);
 });
 
-server.tool("get_device_info", "Read firmware, PIN_11 and PIN_5 status.", {}, async () => {
-  const device = await daemon.request<DeviceState>("get_device_info");
+server.tool("disconnect_all_devices", "Close every connected AG32 Logic serial connection.", {}, async () => {
+  const result = await daemon.request("disconnect_all");
+  return textResult(result);
+});
+
+server.tool("set_active_device", "Select which connected device is used by calls that omit deviceId.", {
+  deviceId: z.string().min(1),
+}, async ({ deviceId }) => {
+  const device = await daemon.request<DeviceState>("set_active_device", { deviceId });
+  return textResult(device);
+});
+
+server.tool("get_device_info", "Read firmware, PIN_11 and PIN_5 status for one device.", {
+  deviceId: deviceIdSchema,
+}, async ({ deviceId }) => {
+  const device = await daemon.request<DeviceState>("get_device_info", { deviceId });
   return textResult({
+    deviceId: device.deviceId,
+    alias: device.alias,
+    identity: device.identity,
+    identityStable: device.identityStable,
     port: device.port,
+    connectedAt: device.connectedAt,
     info: device.info,
     pin5: device.pin5,
     pin11Static: device.pin11Static,
@@ -80,6 +104,7 @@ server.tool(
   "capture",
   "Capture CH1-CH4 through the shared daemon and persist samples.bin, capture.vcd and manifest.json.",
   {
+    deviceId: deviceIdSchema,
     sampleRateHz: z
       .number()
       .int()
@@ -103,9 +128,10 @@ server.tool(
       .optional()
       .describe("Edge trigger selections. Any selected edge triggers the capture."),
   },
-  async ({ sampleRateHz, sampleCount, pretriggerPercent, trigger, triggerMode, edges }) => {
+  async ({ deviceId, sampleRateHz, sampleCount, pretriggerPercent, trigger, triggerMode, edges }) => {
     const normalizedTrigger = buildTrigger(triggerMode, trigger, edges);
     const frame = await daemon.request<CaptureFrame>("capture", {
+      deviceId,
       sampleRateHz,
       sampleCount,
       pretriggerPercent: pretriggerPercent ?? 0,
@@ -128,14 +154,60 @@ server.tool(
 );
 
 server.tool(
+  "capture_synchronized",
+  "Capture from two to four connected devices in parallel. This is host-coordinated software synchronization, not a shared hardware clock or common external trigger.",
+  {
+    deviceIds: z.array(z.string().min(1)).min(1).max(4).optional()
+      .describe("Connected deviceIds to capture. Omit to use all connected devices."),
+    sampleRateHz: z.number().int().min(MIN_SAMPLE_RATE_HZ).max(MAX_SAMPLE_RATE_HZ),
+    sampleCount: z.number().int().min(MIN_SAMPLE_COUNT).max(MAX_SAMPLE_COUNT).default(8192),
+    pretriggerPercent: z.number().min(0).max(99).optional(),
+    trigger: z
+      .object({
+        channels: z.array(channelSchema).min(1),
+        highChannels: z.array(channelSchema).min(1),
+      })
+      .optional(),
+    triggerMode: z.enum(["immediate", "level", "edge"]).optional(),
+    edges: z
+      .array(z.object({ channel: channelSchema, direction: z.enum(["rising", "falling"]) }))
+      .optional(),
+  },
+  async ({ deviceIds, sampleRateHz, sampleCount, pretriggerPercent, trigger, triggerMode, edges }) => {
+    const group = await daemon.request<SynchronizedCaptureGroup>("capture_synchronized", {
+      deviceIds,
+      request: {
+        sampleRateHz,
+        sampleCount,
+        pretriggerPercent: pretriggerPercent ?? 0,
+        trigger: buildTrigger(triggerMode, trigger, edges),
+        persist: true,
+      },
+    });
+    return textResult({
+      ...group,
+      frames: group.frames.map((entry) => ({
+        deviceId: entry.deviceId,
+        alias: entry.alias,
+        hostReadyAt: entry.hostReadyAt,
+        hostStartAt: entry.hostStartAt,
+        hostCompleteAt: entry.hostCompleteAt,
+        frame: summarizeFrame(entry.frame),
+      })),
+    });
+  },
+);
+
+server.tool(
   "configure_pin5_square_wave",
   "Configure PIN_5 as a 50% duty-cycle digital square wave.",
   {
+    deviceId: deviceIdSchema,
     frequencyHz: z.number().int().min(PIN5_SQUARE_MIN_HZ).max(PIN5_SQUARE_MAX_HZ)
       .describe("Frequency in Hz from 1 Hz to 100 MHz."),
   },
-  async ({ frequencyHz }) => {
-    const device = await daemon.request<DeviceState>("configure_pin5_square", { frequencyHz });
+  async ({ deviceId, frequencyHz }) => {
+    const device = await daemon.request<DeviceState>("configure_pin5_square", { deviceId, frequencyHz });
     return textResult({ pin: "PIN_5", frequencyHz, status: device.pin5 });
   },
 );
@@ -144,6 +216,7 @@ server.tool(
   "configure_pin5_trigger_engine",
   "Configure the PIN_5 delayed or host-triggered level and pulse engine.",
   {
+    deviceId: deviceIdSchema,
     mode: z.enum(PIN5_TRIGGER_MODES).describe("delayed_level, delayed_pulse, host_level, or host_pulse."),
     activeLevel: z.enum(["high", "low"]).default("high"),
     idleLevel: z.enum(["high", "low"]).default("low"),
@@ -152,7 +225,9 @@ server.tool(
     action: z.enum(["arm", "fire", "reset"]).optional(),
   },
   async (input) => {
-    const device = await daemon.request<DeviceState>("configure_pin5_engine", input as Pin5EngineConfig);
+    const device = await daemon.request<DeviceState>("configure_pin5_engine", input as Pin5EngineConfig & {
+      deviceId?: string;
+    });
     return textResult({ pin: "PIN_5", requested: input, status: device.pin5 });
   },
 );
@@ -161,10 +236,11 @@ server.tool(
   "pin5_engine_control",
   "Send only the PIN_5 engine control word (arm/fire/reset) without rewriting config, delay or width.",
   {
+    deviceId: deviceIdSchema,
     action: z.enum(["arm", "fire", "reset"]).describe("Single engine control action to send."),
   },
-  async ({ action }) => {
-    const device = await daemon.request<DeviceState>("pin5_engine_control", { action });
+  async ({ deviceId, action }) => {
+    const device = await daemon.request<DeviceState>("pin5_engine_control", { deviceId, action });
     return textResult({ pin: "PIN_5", action, status: device.pin5 });
   },
 );
@@ -173,6 +249,7 @@ server.tool(
   "configure_pin11_waveform",
   "Configure PIN_11 DAC0 waveform, frequency, amplitude and output enable.",
   {
+    deviceId: deviceIdSchema,
     waveform: z.enum(WAVE_TYPES).describe("sine, square, sawtooth, or triangle."),
     frequencyHz: z.number().int().min(1).max(PIN11_RATE_CAP_MAX_HZ)
       .describe("Requested frequency. The daemon clamps it to the DAC rate cap for the selected waveform."),
@@ -181,7 +258,9 @@ server.tool(
     rateCapHz: z.number().int().min(PIN11_RATE_CAP_MIN_HZ).max(PIN11_RATE_CAP_MAX_HZ).optional(),
   },
   async (input) => {
-    const device = await daemon.request<DeviceState>("configure_pin11", input as Pin11Config);
+    const device = await daemon.request<DeviceState>("configure_pin11", input as Pin11Config & {
+      deviceId?: string;
+    });
     return textResult({ pin: "PIN_11", info: device.info, staticMode: device.pin11Static });
   },
 );
@@ -190,23 +269,41 @@ server.tool(
   "configure_pin11_static_level",
   "Drive PIN_11 to off/high-Z, static low, or static high through GEN_STATIC.",
   {
+    deviceId: deviceIdSchema,
     level: z.enum(["off", "low", "high"]).describe("off = DAC0 off, low = static low, high = full-scale high."),
   },
-  async ({ level }) => {
+  async ({ deviceId, level }) => {
     const mode = { off: 0, low: 1, high: 2 } as const;
-    const device = await daemon.request<DeviceState>("configure_pin11_static", { mode: mode[level] });
+    const device = await daemon.request<DeviceState>("configure_pin11_static", {
+      deviceId,
+      mode: mode[level],
+    });
     return textResult({ pin: "PIN_11", level, applied: true, device });
   },
 );
 
-server.tool("safe_idle", "Set PIN_11 off and PIN_5 to a non-toggling low level.", {}, async () => {
-  const device = await daemon.request<DeviceState>("safe_idle");
+server.tool("safe_idle", "Set PIN_11 off and PIN_5 to a non-toggling low level.", {
+  deviceId: deviceIdSchema,
+}, async ({ deviceId }) => {
+  const device = await daemon.request<DeviceState>("safe_idle", { deviceId });
   return textResult({ device, note: "PIN_5 cannot enter high impedance; it outputs low." });
 });
 
-server.tool("get_latest_capture", "Read metadata for the latest capture performed by the desktop app or MCP.", {}, async () => {
-  const frame = await daemon.request<CaptureFrame | null>("get_latest_capture");
+server.tool("safe_idle_all", "Set every connected device to the safe idle output state.", {}, async () => {
+  const devices = await daemon.request<DeviceState[]>("safe_idle_all");
+  return textResult({ devices, note: "PIN_5 cannot enter high impedance; it outputs low." });
+});
+
+server.tool("get_latest_capture", "Read metadata for the latest capture performed by the desktop app or MCP.", {
+  deviceId: deviceIdSchema,
+  group: z.boolean().optional().describe("Set true to read the latest synchronized group."),
+}, async ({ deviceId, group }) => {
+  const frame = await daemon.request<CaptureFrame | SynchronizedCaptureGroup | null>(
+    "get_latest_capture",
+    { deviceId, group },
+  );
   if (!frame) return textResult(null);
+  if ("frames" in frame) return textResult(frame);
   const { samplesBase64: _samples, ...summary } = frame;
   return textResult(summary);
 });
@@ -214,16 +311,17 @@ server.tool("get_latest_capture", "Read metadata for the latest capture performe
 server.tool(
   "run_loopback_check",
   "Run a protocol-level self-test and physical channel activity scan. Physical PASS requires a jumper.",
-  {},
-  async () => {
+  { deviceId: deviceIdSchema },
+  async ({ deviceId }) => {
     const frame = await daemon.request<CaptureFrame>("capture", {
+      deviceId,
       sampleRateHz: 100_000_000,
       sampleCount: 8192,
       pretriggerPercent: 0,
       trigger: { mode: "immediate" },
       persist: false,
     });
-    const device = await daemon.request<DeviceState>("get_device_info");
+    const device = await daemon.request<DeviceState>("get_device_info", { deviceId });
     return textResult({
       protocol: "PASS",
       physical: frame.activeChannels.length > 0 ? "ACTIVE" : "SKIP_NO_JUMPER",
@@ -308,6 +406,11 @@ function textResult(value: unknown) {
       },
     ],
   };
+}
+
+function summarizeFrame(frame: CaptureFrame) {
+  const { samplesBase64: _samples, ...summary } = frame;
+  return summary;
 }
 
 void main().catch((error) => {

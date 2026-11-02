@@ -112,15 +112,15 @@ ag32-logic-analyzer/
 
 | 路径 | 内容 |
 |---|---|
-| `src/renderer/` | React 浅色工作台 |
+| `src/renderer/` | React 浅色工作台；四设备槽位、独立 LED 编号和联合波形视图 |
 | `src/desktop/` | Electron 主进程与 preload |
-| `src/daemon/` | 独占 USB CDC 的共享后台 |
+| `src/daemon/` | 独占 USB CDC 的共享后台；每设备会话、队列、重复采集和联合采集 |
 | `src/device.ts` | 串口设备与 SUMP/OLS 协议 |
 | `src/index.ts` | MCP stdio server |
 | `src/test/` | TypeScript 自动化测试 |
 | `scripts/` | MCP、UI、硬件与辅助脚本 |
 | `build/` | Electron 图标资源 |
-| `docs/images/` | 桌面端三张界面截图 |
+| `docs/images/` | 桌面端主界面、四设备联合视图、信号输出与历史截图 |
 | `release/` | 本地生成的安装 EXE 与便携 ZIP |
 
 `mcp/node_modules/`、`mcp/dist/`、`mcp/artifacts/`、`mcp/release/win-unpacked/` 都是可重建目录，已从工作区清理。

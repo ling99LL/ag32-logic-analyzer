@@ -1,4 +1,3 @@
-import path from "node:path";
 import {
   Ag32SerialDevice,
   listSerialPorts,
@@ -15,8 +14,6 @@ import {
   MIN_SAMPLE_COUNT,
   MIN_SAMPLE_RATE_HZ,
   normalizeSampleCount,
-  parseInfoFrame,
-  parsePin5StatusFrame,
 } from "../protocol.js";
 import { analyzeSamples, exportVcd, findActiveChannels } from "../analysis.js";
 import type {
@@ -37,9 +34,19 @@ import type {
   RepeatState,
   SerialPortInfo,
   StorageUsage,
+  SynchronizedCaptureEntry,
+  SynchronizedCaptureGroup,
 } from "../shared/types.js";
 import { DEFAULT_SETTINGS } from "../shared/types.js";
 import { CaptureStore } from "./storage.js";
+
+const MAX_DEVICES = 4;
+const DEFAULT_REPEAT_REQUEST: Omit<CaptureRequest, "persist"> = {
+  sampleRateHz: 20_000_000,
+  sampleCount: 4096,
+  pretriggerPercent: 50,
+  trigger: { mode: "immediate" },
+};
 
 interface ConnectedClient extends ClientState {
   send: (message: unknown) => void;
@@ -50,6 +57,7 @@ interface QueueJob<T = unknown> {
   priority: number;
   role: ClientRole;
   label: string;
+  deviceId?: string;
   trackActivity: boolean;
   run: () => Promise<T>;
   resolve: (value: T) => void;
@@ -62,31 +70,38 @@ interface ActiveCapture {
   yieldTimer: NodeJS.Timeout | null;
 }
 
+interface DeviceContext {
+  state: DeviceState;
+  session: Ag32Session;
+  customAlias: boolean;
+  queue: QueueJob[];
+  processing: boolean;
+  sequence: number;
+  currentJobPriority: number | null;
+  activeCapture: ActiveCapture | null;
+  repeatGeneration: number;
+  repeatState: RepeatState;
+  repeatRequest: Omit<CaptureRequest, "persist">;
+  latestCapture: CaptureFrame | null;
+}
+
+interface CaptureResult {
+  frame: CaptureFrame;
+  hostReadyAt: string;
+  hostStartAt: string;
+  hostCompleteAt: string;
+}
+
 export class DaemonBroker {
-  private readonly session = new Ag32Session();
+  private readonly devices = new Map<string, DeviceContext>();
   private readonly clients = new Map<string, ConnectedClient>();
-  private readonly queue: QueueJob[] = [];
   private readonly previewFrames: CaptureFrame[] = [];
   private readonly activity: ActivityItem[] = [];
+  private readonly queue: QueueJob[] = [];
+  private synchronizedCapture: SynchronizedCaptureGroup | null = null;
+  private activeDeviceId: string | null = null;
   private processing = false;
   private sequence = 0;
-  private repeatGeneration = 0;
-  private repeatState: RepeatState = { active: false, fps: 20, ownerRole: null };
-  private repeatRequest: Omit<CaptureRequest, "persist"> = {
-    sampleRateHz: 20_000_000,
-    sampleCount: 4096,
-    pretriggerPercent: 50,
-    trigger: { mode: "immediate" },
-  };
-  private latestCapture: CaptureFrame | null = null;
-  private deviceState: DeviceState = {
-    connected: false,
-    port: null,
-    info: null,
-    pin5: null,
-    pin11Static: null,
-    deviceIndex: null,
-  };
   private storageUsage: StorageUsage = {
     previewBytes: 0,
     persistentBytes: 0,
@@ -95,7 +110,6 @@ export class DaemonBroker {
     previewFrames: 0,
     persistentRecords: 0,
   };
-  private activeCapture: ActiveCapture | null = null;
 
   constructor(
     private readonly store: CaptureStore,
@@ -132,35 +146,58 @@ export class DaemonBroker {
       case "connect":
         return this.withQueue(role, "连接设备", this.priority(role), true, () => this.connect(params));
       case "disconnect":
-        return this.withQueue(role, "断开设备", this.priority(role), true, () => this.disconnect());
+        return this.disconnect(params);
+      case "disconnect_all":
+        return this.disconnectAll();
+      case "set_active_device":
+        return this.setActiveDevice(params);
       case "set_device_index":
-        return this.withQueue(role, "设置设备编号", this.priority(role), true, () => this.setDeviceIndex(params));
+        return this.runOnDevice(role, params, "设置设备编号", true, (context) =>
+          this.setDeviceIndex(context, params));
       case "get_device_info":
-        return this.withQueue(role, "读取设备状态", this.priority(role), false, () => this.readDeviceState());
-      case "capture":
-        return this.withQueue(
-          role,
-          role === "mcp" ? "MCP 采集" : "采集波形",
-          this.priority(role),
-          true,
-          () => this.captureFromRequest(role, normalizeCaptureRequest(params), role === "mcp"),
-        );
+        return this.runOnDevice(role, params, "读取设备状态", false, (context) =>
+          this.readDeviceState(context), true);
+      case "capture": {
+        const input = asRecord(params);
+        const request = normalizeCaptureRequest(input);
+        return this.runOnDevice(role, params, role === "mcp" ? "MCP 采集" : "采集波形", true, (context) =>
+          this.captureFromRequest(context, role, request, role === "mcp").then((result) => result.frame));
+      }
+      case "capture_synchronized":
+        return this.captureSynchronized(role, params);
+      case "get_synchronized_capture": {
+        const input = asRecordOrEmpty(params);
+        if (input.id && this.synchronizedCapture?.id !== String(input.id)) {
+          throw new Error(`未找到联合采集 ${String(input.id)}`);
+        }
+        return this.synchronizedCapture;
+      }
       case "start_repeat":
-        return this.withQueue(role, "启动重复采集", this.priority(role), true, () => this.startRepeat(role, params));
+        return this.runOnDevice(role, params, "启动重复采集", true, (context) =>
+          this.startRepeat(context, role, params));
       case "stop_repeat":
-        return this.withQueue(role, "停止重复采集", this.priority(role), true, () => this.stopRepeat());
+        return this.runOnDevice(role, params, "停止重复采集", true, (context) =>
+          this.stopRepeat(context));
       case "configure_pin5_square":
-        return this.withQueue(role, "设置 PIN_5 方波", this.priority(role), true, () => this.configurePin5Square(params));
+        return this.runOnDevice(role, params, "设置 PIN_5 方波", true, (context) =>
+          this.configurePin5Square(context, params));
       case "configure_pin5_engine":
-        return this.withQueue(role, "设置 PIN_5 引擎", this.priority(role), true, () => this.configurePin5Engine(params));
+        return this.runOnDevice(role, params, "设置 PIN_5 引擎", true, (context) =>
+          this.configurePin5Engine(context, params));
       case "pin5_engine_control":
-        return this.withQueue(role, "控制 PIN_5 引擎", this.priority(role), true, () => this.controlPin5Engine(params));
+        return this.runOnDevice(role, params, "控制 PIN_5 引擎", true, (context) =>
+          this.controlPin5Engine(context, params));
       case "configure_pin11":
-        return this.withQueue(role, "设置 PIN_11 输出", this.priority(role), true, () => this.configurePin11(params));
+        return this.runOnDevice(role, params, "设置 PIN_11 输出", true, (context) =>
+          this.configurePin11(context, params));
       case "configure_pin11_static":
-        return this.withQueue(role, "设置 PIN_11 静态输出", this.priority(role), true, () => this.configurePin11Static(params));
+        return this.runOnDevice(role, params, "设置 PIN_11 静态输出", true, (context) =>
+          this.configurePin11Static(context, params));
       case "safe_idle":
-        return this.withQueue(role, "输出安全空闲", this.priority(role), true, () => this.safeIdle());
+        return this.runOnDevice(role, params, "输出安全空闲", true, (context) =>
+          this.safeIdle(context));
+      case "safe_idle_all":
+        return this.safeIdleAll(role);
       case "history_list":
         return this.store.list();
       case "history_load": {
@@ -184,7 +221,7 @@ export class DaemonBroker {
         await this.refreshStorageUsage();
         return this.storageUsage;
       case "get_latest_capture":
-        return this.latestCapture;
+        return this.resolveLatestCapture(params);
       case "get_settings":
         return this.store.getSettings();
       case "save_settings": {
@@ -197,196 +234,391 @@ export class DaemonBroker {
   }
 
   async shutdown(): Promise<void> {
-    this.repeatState.active = false;
-    this.repeatGeneration += 1;
-    await this.activeCapture?.abort?.().catch(() => undefined);
-    await this.session.disconnect().catch(() => undefined);
+    for (const context of this.devices.values()) {
+      context.repeatState.active = false;
+      context.repeatGeneration += 1;
+      await context.activeCapture?.abort?.().catch(() => undefined);
+    }
+    await Promise.all([...this.devices.values()].map((context) =>
+      context.session.disconnect().catch(() => undefined)));
+    this.devices.clear();
+    this.activeDeviceId = null;
   }
 
   private async snapshot(): Promise<AppSnapshot> {
+    const active = this.activeContext();
+    const devices = [...this.devices.values()].map((context) => context.state);
     return {
-      device: this.deviceState,
-      repeat: this.repeatState,
+      devices,
+      activeDeviceId: this.activeDeviceId,
+      device: active?.state ?? emptyDeviceState(),
+      repeat: active?.repeatState ?? emptyRepeatState(),
       clients: [...this.clients.values()].map(({ id, role, name }) => ({ id, role, name })),
-      latestCapture: this.latestCapture,
+      latestCapture: active?.latestCapture ?? this.synchronizedCapture?.frames[0]?.frame ?? null,
+      latestCaptures: [...this.devices.values()]
+        .map((context) => context.latestCapture)
+        .filter((frame): frame is CaptureFrame => Boolean(frame)),
+      synchronizedCapture: this.synchronizedCapture,
       activity: this.activity.slice(0, 20),
       storage: this.storageUsage,
     };
   }
 
   private async listDevices(params: unknown): Promise<DeviceListResult> {
-    const preferPort = typeof asRecordOrEmpty(params).preferPort === "string"
-      ? String(asRecordOrEmpty(params).preferPort)
-      : undefined;
+    const input = asRecordOrEmpty(params);
+    const preferPort = typeof input.preferPort === "string" ? input.preferPort : undefined;
     const rawPorts = await listSerialPorts();
     const ordered = preferPort
-      ? [preferPort, ...rawPorts.filter((port) => port !== preferPort)]
+      ? [
+          ...rawPorts.filter((port) => port.path === preferPort),
+          ...rawPorts.filter((port) => port.path !== preferPort),
+        ]
       : rawPorts;
     const devices: SerialPortInfo[] = [];
     for (const port of ordered) {
-      if (this.deviceState.connected && this.deviceState.port === port) {
+      const connected = [...this.devices.values()].find((context) => context.state.port === port.path);
+      const identity = deviceIdentity(port);
+      if (connected) {
         devices.push({
-          path: port,
+          ...port,
+          identity: connected.state.identity,
+          identityStable: connected.state.identityStable,
+          connectedDeviceId: connected.state.deviceId,
+          connectedAlias: connected.state.alias,
           sumpId: true,
-          firmware: this.deviceState.info
-            ? `v${this.deviceState.info.firmware.major}.${this.deviceState.info.firmware.minor}`
+          firmware: connected.state.info
+            ? `v${connected.state.info.firmware.major}.${connected.state.info.firmware.minor}`
             : undefined,
-          deviceIndex: this.deviceState.deviceIndex,
+          deviceIndex: connected.state.deviceIndex,
         });
         continue;
       }
-      const device = await Ag32SerialDevice.open(port);
+      const device = await Ag32SerialDevice.open(port.path);
       if (!device) {
-        devices.push({ path: port, error: "端口不可用或已被占用" });
+        devices.push({
+          ...port,
+          identity: identity.identity,
+          identityStable: identity.stable,
+          error: "端口不可用或已被占用",
+        });
         continue;
       }
       try {
         const sumpId = await probeSumpId(device);
         const info = sumpId ? await readInfoFrame(device) : undefined;
         devices.push({
-          path: port,
+          ...port,
+          identity: identity.identity,
+          identityStable: identity.stable,
           sumpId,
           firmware: info ? `v${info.firmware.major}.${info.firmware.minor}` : undefined,
           deviceIndex: info?.deviceIndex ?? null,
         });
       } catch (error) {
-        devices.push({ path: port, error: error instanceof Error ? error.message : String(error) });
+        devices.push({
+          ...port,
+          identity: identity.identity,
+          identityStable: identity.stable,
+          error: error instanceof Error ? error.message : String(error),
+        });
       } finally {
         await device.close().catch(() => undefined);
       }
     }
     return {
-      selected: devices.find((device) => device.sumpId)?.path ?? null,
+      selected: this.activeContext()?.state.port
+        ?? devices.find((device) => device.sumpId)?.path
+        ?? null,
       devices,
     };
   }
 
-  private async connect(
-    params: unknown,
-  ): Promise<{ connected: true; port: string; deviceIndex: 1 | 2 | 3 | 4 | null }> {
+  private async connect(params: unknown): Promise<DeviceState> {
     const input = asRecord(params);
     if (typeof input.port !== "string" || input.port.length === 0) throw new Error("缺少串口名称");
     const requestedIndex = optionalDeviceIndex(input.deviceIndex);
-    try {
-      let info = await this.session.connect(input.port);
-      if (requestedIndex !== undefined) {
-        info = await this.session.setDeviceIndex(requestedIndex);
+    if (input.deviceIndex !== undefined && (requestedIndex === undefined || requestedIndex === 0)) {
+      throw new Error("设备编号必须是 1、2、3 或 4");
+    }
+    const port = input.port;
+    const portInfo = (await listSerialPorts()).find((item) => item.path === port);
+    const identity = deviceIdentity(portInfo ?? { path: port });
+    const existing = this.devices.get(identity.identity);
+    const alias = typeof input.alias === "string" && input.alias.trim()
+      ? input.alias.trim().slice(0, 32)
+      : undefined;
+    if (existing) {
+      const changedSlot = deviceSlot(requestedIndex);
+      if (changedSlot && changedSlot !== existing.state.deviceIndex) {
+        await this.assertIndexAvailable(changedSlot, existing.state.deviceId);
+        const info = await existing.session.setDeviceIndex(changedSlot);
+        existing.state = {
+          ...existing.state,
+          info,
+          deviceIndex: info.deviceIndex,
+          alias: existing.customAlias ? existing.state.alias : `#${changedSlot}`,
+        };
       }
-      this.deviceState = {
-        connected: true,
-        port: input.port,
-        info,
-        pin5: await this.session.getPin5Status().catch(() => null),
-        pin11Static: null,
-        deviceIndex: info.deviceIndex,
+      if (alias) {
+        existing.customAlias = true;
+        existing.state = { ...existing.state, alias };
+      }
+      this.activeDeviceId = existing.state.deviceId;
+      this.emitDevice(existing);
+      return existing.state;
+    }
+    if (this.devices.size >= MAX_DEVICES) {
+      throw new Error("当前版本最多同时连接 4 台 AG32 逻辑分析仪");
+    }
+    const explicitSlot = deviceSlot(requestedIndex);
+    const slot = explicitSlot ?? this.nextAvailableIndex();
+    if (!slot) throw new Error("没有可用的设备编号 1-4");
+    await this.assertIndexAvailable(slot);
+    const session = new Ag32Session();
+    try {
+      let info = await session.connect(port);
+      info = await session.setDeviceIndex(slot);
+      const context: DeviceContext = {
+        state: {
+          deviceId: identity.identity,
+          alias: alias ?? `#${slot}`,
+          identity: identity.identity,
+          identityStable: identity.stable,
+          connected: true,
+          port,
+          connectedAt: new Date().toISOString(),
+          info,
+          pin5: await session.getPin5Status().catch(() => null),
+          pin11Static: null,
+          deviceIndex: info.deviceIndex,
+        },
+        session,
+        customAlias: Boolean(alias),
+        queue: [],
+        processing: false,
+        sequence: 0,
+        currentJobPriority: null,
+        activeCapture: null,
+        repeatGeneration: 0,
+        repeatState: emptyRepeatState(identity.identity),
+        repeatRequest: { ...DEFAULT_REPEAT_REQUEST },
+        latestCapture: null,
       };
-      this.emitDevice();
-      return { connected: true, port: input.port, deviceIndex: info.deviceIndex };
+      this.devices.set(identity.identity, context);
+      this.activeDeviceId = identity.identity;
+      this.emitDevice(context);
+      return context.state;
     } catch (error) {
-      await this.session.disconnect().catch(() => undefined);
+      await session.disconnect().catch(() => undefined);
       throw error;
     }
   }
 
-  private async disconnect(): Promise<{ connected: false }> {
-    await this.stopRepeat();
-    await this.session.disconnect();
-    this.deviceState = {
-      connected: false,
-      port: null,
-      info: null,
-      pin5: null,
-      pin11Static: null,
-      deviceIndex: null,
-    };
-    this.emitDevice();
-    return { connected: false };
+  private async disconnect(params: unknown): Promise<{ connected: false; deviceId: string }> {
+    const context = this.resolveDevice(params);
+    await this.stopRepeat(context);
+    await context.session.disconnect();
+    this.devices.delete(context.state.deviceId);
+    if (this.activeDeviceId === context.state.deviceId) {
+      this.activeDeviceId = this.devices.keys().next().value ?? null;
+    }
+    this.broadcast({ event: "device", data: context.state });
+    this.emitSnapshot();
+    return { connected: false, deviceId: context.state.deviceId };
   }
 
-  private async setDeviceIndex(params: unknown): Promise<DeviceState> {
-    this.requireConnected();
+  private async disconnectAll(): Promise<{ disconnected: string[] }> {
+    const ids = [...this.devices.keys()];
+    for (const id of ids) {
+      const context = this.devices.get(id);
+      if (!context) continue;
+      await this.stopRepeat(context);
+      await context.session.disconnect().catch(() => undefined);
+      this.devices.delete(id);
+    }
+    this.activeDeviceId = null;
+    this.emitSnapshot();
+    return { disconnected: ids };
+  }
+
+  private setActiveDevice(params: unknown): AppSnapshot["device"] {
+    const input = asRecord(params);
+    const deviceId = typeof input.deviceId === "string" ? input.deviceId : "";
+    const context = this.devices.get(deviceId);
+    if (!context) throw new Error(`设备 ${deviceId || "(空)"} 未连接`);
+    this.activeDeviceId = deviceId;
+    this.emitSnapshot();
+    return context.state;
+  }
+
+  private async setDeviceIndex(context: DeviceContext, params: unknown): Promise<DeviceState> {
     const input = asRecord(params);
     const deviceIndex = optionalDeviceIndex(input.deviceIndex);
-    if (deviceIndex === undefined) throw new Error("设备编号必须是 1、2、3 或 4");
-    const info = await this.session.setDeviceIndex(deviceIndex);
-    this.deviceState = {
-      ...this.deviceState,
+    if (deviceIndex === undefined || deviceIndex === 0) {
+      throw new Error("设备编号必须是 1、2、3 或 4");
+    }
+    await this.assertIndexAvailable(deviceIndex, context.state.deviceId);
+    const info = await context.session.setDeviceIndex(deviceIndex);
+    context.state = {
+      ...context.state,
       info,
       deviceIndex: info.deviceIndex,
+      alias: context.customAlias ? context.state.alias : `#${deviceIndex}`,
     };
-    this.emitDevice();
-    return this.deviceState;
+    this.emitDevice(context);
+    return context.state;
   }
 
-  private async readDeviceState(): Promise<DeviceState> {
-    if (!this.deviceState.connected) return this.deviceState;
-    this.deviceState = {
-      ...this.deviceState,
-      info: await this.session.getInfo(),
-      pin5: await this.session.getPin5Status(),
+  private async readDeviceState(context: DeviceContext): Promise<DeviceState> {
+    if (!context.state.connected) return context.state;
+    context.state = {
+      ...context.state,
+      info: await context.session.getInfo(),
+      pin5: await context.session.getPin5Status(),
     };
-    this.emitDevice();
-    return this.deviceState;
+    this.emitDevice(context);
+    return context.state;
   }
 
-  private async startRepeat(role: ClientRole, params: unknown): Promise<RepeatState> {
-    this.requireConnected();
+  private async startRepeat(
+    context: DeviceContext,
+    role: ClientRole,
+    params: unknown,
+  ): Promise<RepeatState> {
     const input = asRecord(params);
     const fps = Math.max(1, Math.min(30, Number(input.fps) || 20));
-    this.repeatRequest = normalizeCaptureRequest(input.request);
-    this.repeatState = { active: true, fps, ownerRole: role };
-    this.repeatGeneration += 1;
-    const generation = this.repeatGeneration;
-    void this.runRepeatLoop(generation);
+    context.repeatRequest = normalizeCaptureRequest(input.request);
+    context.repeatState = {
+      active: true,
+      fps,
+      ownerRole: role,
+      deviceId: context.state.deviceId,
+    };
+    context.repeatGeneration += 1;
+    const generation = context.repeatGeneration;
+    void this.runRepeatLoop(context, generation);
     this.emitSnapshot();
-    return this.repeatState;
+    return context.repeatState;
   }
 
-  private async stopRepeat(): Promise<RepeatState> {
-    this.repeatState = { ...this.repeatState, active: false, ownerRole: null };
-    this.repeatGeneration += 1;
-    this.requestCaptureYield(0);
+  private async stopRepeat(context: DeviceContext): Promise<RepeatState> {
+    context.repeatState = {
+      ...context.repeatState,
+      active: false,
+      ownerRole: null,
+      deviceId: context.state.deviceId,
+    };
+    context.repeatGeneration += 1;
+    this.requestCaptureYield(context, 0);
     this.emitSnapshot();
-    return this.repeatState;
+    return context.repeatState;
   }
 
-  private async runRepeatLoop(generation: number): Promise<void> {
-    while (this.repeatState.active && generation === this.repeatGeneration) {
+  private async runRepeatLoop(context: DeviceContext, generation: number): Promise<void> {
+    while (context.repeatState.active && generation === context.repeatGeneration) {
       const started = Date.now();
       try {
-        const frame = await this.withQueue(
-          this.repeatState.ownerRole ?? "desktop",
+        await this.withDeviceQueue(
+          context,
+          context.repeatState.ownerRole ?? "desktop",
           "预览采集",
           30,
           false,
-          () => this.captureFromRequest(this.repeatState.ownerRole ?? "desktop", this.repeatRequest, false),
+          () => this.captureFromRequest(
+            context,
+            context.repeatState.ownerRole ?? "desktop",
+            context.repeatRequest,
+            false,
+          ),
         );
-        void frame;
       } catch (error) {
         if (!(error instanceof CaptureAbortedError)) {
           this.pushActivity({
-            role: this.repeatState.ownerRole ?? "desktop",
-            label: "重复采集失败",
+            role: context.repeatState.ownerRole ?? "desktop",
+            deviceId: context.state.deviceId,
+            label: `${context.state.alias} 重复采集失败`,
             status: "error",
             detail: error instanceof Error ? error.message : String(error),
           });
           await new Promise((resolve) => setTimeout(resolve, 200));
         }
       }
-      const interval = 1000 / Math.max(1, this.repeatState.fps);
-      await new Promise((resolve) => setTimeout(resolve, Math.max(0, interval - (Date.now() - started))));
+      const interval = 1000 / Math.max(1, context.repeatState.fps);
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, interval - (Date.now() - started))));
     }
   }
 
+  private async captureSynchronized(
+    role: ClientRole,
+    params: unknown,
+  ): Promise<SynchronizedCaptureGroup> {
+    const input = asRecord(params);
+    const requestedIds = Array.isArray(input.deviceIds)
+      ? input.deviceIds.map(String)
+      : [...this.devices.keys()];
+    const contexts = requestedIds.map((id) => {
+      const context = this.devices.get(id);
+      if (!context) throw new Error(`设备 ${id} 未连接`);
+      return context;
+    });
+    if (contexts.length === 0) throw new Error("没有可用于联合采集的设备");
+    if (contexts.length > MAX_DEVICES) throw new Error("联合采集最多支持 4 台设备");
+    if (new Set(contexts.map((context) => context.state.deviceId)).size !== contexts.length) {
+      throw new Error("联合采集设备列表包含重复项");
+    }
+    const request = normalizeCaptureRequest(input.request ?? input);
+    const priority = this.priority(role);
+    const results = await Promise.all(contexts.map((context) =>
+      this.withDeviceQueue(
+        context,
+        role,
+        role === "mcp" ? "MCP 联合采集" : "联合采集",
+        priority,
+        true,
+        () => this.captureFromRequest(context, role, request, role === "mcp"),
+      )));
+    const started = Math.min(...results.map((result) => Date.parse(result.hostStartAt)));
+    const completed = Math.max(...results.map((result) => Date.parse(result.hostCompleteAt)));
+    const createdAt = new Date().toISOString();
+    const entries: SynchronizedCaptureEntry[] = results.map((result) => ({
+      deviceId: result.frame.deviceId ?? "",
+      alias: result.frame.deviceAlias ?? "",
+      frame: result.frame,
+      hostReadyAt: result.hostReadyAt,
+      hostStartAt: result.hostStartAt,
+      hostCompleteAt: result.hostCompleteAt,
+    }));
+    const group: SynchronizedCaptureGroup = {
+      id: `${createdAt.replace(/[:.]/g, "-")}-group-${Math.random().toString(36).slice(2, 7)}`,
+      createdAt,
+      deviceIds: entries.map((entry) => entry.deviceId),
+      syncMode: "software",
+      hardwareSynchronized: false,
+      maxStartSkewMs: Math.max(...results.map((result) =>
+        Math.abs(Date.parse(result.hostStartAt) - started))),
+      durationMs: completed - started,
+      request,
+      frames: entries,
+      note: "主机并行启动并读取；各设备仍由自身采样时钟计时。严格时序比较需要公共外部触发和公共参考时钟。",
+    };
+    this.synchronizedCapture = group;
+    this.broadcast({ event: "group_capture", data: group });
+    this.emitSnapshot();
+    return group;
+  }
+
   private async captureFromRequest(
+    context: DeviceContext,
     role: ClientRole,
     request: CaptureRequest,
     forcePersistent: boolean,
-  ): Promise<CaptureFrame> {
-    this.requireConnected();
-    const capturePriority = this.currentJobPriority ?? this.priority(role);
+  ): Promise<CaptureResult> {
+    const capturePriority = context.currentJobPriority ?? this.priority(role);
     const active: ActiveCapture = { priority: capturePriority, abort: null, yieldTimer: null };
-    const result = await this.session.capture(
+    const hostReadyAt = new Date().toISOString();
+    const hostStartAt = new Date().toISOString();
+    const result = await context.session.capture(
       {
         sampleRateHz: request.sampleRateHz,
         sampleCount: request.sampleCount,
@@ -396,22 +628,27 @@ export class DaemonBroker {
       {
         registerAbort: (abort) => {
           active.abort = abort;
-          this.activeCapture = active;
-          const queuedPriority = this.queue[0]?.priority;
-          if (queuedPriority !== undefined) this.requestCaptureYield(queuedPriority);
+          context.activeCapture = active;
+          const queuedPriority = context.queue[0]?.priority;
+          if (queuedPriority !== undefined) this.requestCaptureYield(context, queuedPriority);
         },
       },
     ).finally(() => {
-      if (this.activeCapture === active) this.activeCapture = null;
+      if (context.activeCapture === active) context.activeCapture = null;
       if (active.yieldTimer) clearTimeout(active.yieldTimer);
     });
 
-    const measurements = analyzeSamples(result.samples, result.actualSampleRateHz) as CaptureFrame["channels"];
+    const measurements = analyzeSamples(
+      result.samples,
+      result.actualSampleRateHz,
+    ) as CaptureFrame["channels"];
     const activeChannels = findActiveChannels(measurements) as ChannelName[];
     const createdAt = new Date().toISOString();
     const id = `${createdAt.replace(/[:.]/g, "-")}-${Math.random().toString(36).slice(2, 7)}`;
     let frame: CaptureFrame = {
       id,
+      deviceId: context.state.deviceId,
+      deviceAlias: context.state.alias,
       createdAt,
       source: role,
       persistent: forcePersistent || Boolean(request.persist),
@@ -444,56 +681,57 @@ export class DaemonBroker {
         totalBytes: previewBytes + this.storageUsage.persistentBytes,
       };
     }
-    this.latestCapture = frame;
+    context.latestCapture = frame;
     this.broadcast({ event: "capture", data: frame });
     if (frame.persistent) this.emitSnapshot();
-    return frame;
+    return {
+      frame,
+      hostReadyAt,
+      hostStartAt,
+      hostCompleteAt: new Date().toISOString(),
+    };
   }
 
-  private async configurePin5Square(params: unknown): Promise<DeviceState> {
-    this.requireConnected();
+  private async configurePin5Square(context: DeviceContext, params: unknown): Promise<DeviceState> {
     const input = asRecord(params);
     const frequencyHz = Math.round(Number(input.frequencyHz));
     if (!Number.isFinite(frequencyHz) || frequencyHz < 1 || frequencyHz > 100_000_000) {
       throw new Error("PIN_5 方波频率必须在 1 Hz 至 100 MHz");
     }
-    this.deviceState = {
-      ...this.deviceState,
-      pin5: await this.session.configurePin5SquareWave(frequencyHz),
-      info: await this.session.getInfo(),
+    context.state = {
+      ...context.state,
+      pin5: await context.session.configurePin5SquareWave(frequencyHz),
+      info: await context.session.getInfo(),
     };
-    this.emitDevice();
-    return this.deviceState;
+    this.emitDevice(context);
+    return context.state;
   }
 
-  private async configurePin5Engine(params: unknown): Promise<DeviceState> {
-    this.requireConnected();
+  private async configurePin5Engine(context: DeviceContext, params: unknown): Promise<DeviceState> {
     const config = normalizePin5Engine(params);
-    this.deviceState = {
-      ...this.deviceState,
-      pin5: await this.session.configurePin5Engine(config),
-      info: await this.session.getInfo(),
+    context.state = {
+      ...context.state,
+      pin5: await context.session.configurePin5Engine(config),
+      info: await context.session.getInfo(),
     };
-    this.emitDevice();
-    return this.deviceState;
+    this.emitDevice(context);
+    return context.state;
   }
 
-  private async controlPin5Engine(params: unknown): Promise<DeviceState> {
-    this.requireConnected();
+  private async controlPin5Engine(context: DeviceContext, params: unknown): Promise<DeviceState> {
     const input = asRecord(params);
     const action = String(input.action) as "arm" | "fire" | "reset";
     if (!["arm", "fire", "reset"].includes(action)) throw new Error("PIN_5 控制动作无效");
-    this.deviceState = {
-      ...this.deviceState,
-      pin5: await this.session.pin5EngineControl(action),
-      info: await this.session.getInfo(),
+    context.state = {
+      ...context.state,
+      pin5: await context.session.pin5EngineControl(action),
+      info: await context.session.getInfo(),
     };
-    this.emitDevice();
-    return this.deviceState;
+    this.emitDevice(context);
+    return context.state;
   }
 
-  private async configurePin11(params: unknown): Promise<DeviceState> {
-    this.requireConnected();
+  private async configurePin11(context: DeviceContext, params: unknown): Promise<DeviceState> {
     const input = asRecord(params);
     const config: Pin11Config = {
       waveform: String(input.waveform) as Pin11Config["waveform"],
@@ -514,42 +752,104 @@ export class DaemonBroker {
     if (config.rateCapHz !== undefined && (!Number.isFinite(config.rateCapHz) || config.rateCapHz < 1526)) {
       throw new Error("PIN_11 采样率上限无效");
     }
-    const info = await this.session.configurePin11(config);
-    this.deviceState = { ...this.deviceState, info, pin11Static: config.enabled ? null : 0 };
-    this.emitDevice();
-    return this.deviceState;
+    const info = await context.session.configurePin11(config);
+    context.state = { ...context.state, info, pin11Static: config.enabled ? null : 0 };
+    this.emitDevice(context);
+    return context.state;
   }
 
-  private async configurePin11Static(params: unknown): Promise<DeviceState> {
-    this.requireConnected();
+  private async configurePin11Static(context: DeviceContext, params: unknown): Promise<DeviceState> {
     const input = asRecord(params);
     const mode = Number(input.mode);
     if (mode !== 0 && mode !== 1 && mode !== 2) throw new Error("PIN_11 静态输出模式必须是 0、1 或 2");
-    await this.session.configurePin11Static(mode);
-    this.deviceState = {
-      ...this.deviceState,
-      info: await this.session.getInfo(),
+    await context.session.configurePin11Static(mode);
+    context.state = {
+      ...context.state,
+      info: await context.session.getInfo(),
       pin11Static: mode,
     };
-    this.emitDevice();
-    return this.deviceState;
+    this.emitDevice(context);
+    return context.state;
   }
 
-  private async safeIdle(): Promise<DeviceState> {
-    this.requireConnected();
-    const result = await this.session.safeIdle();
-    this.deviceState = {
-      ...this.deviceState,
+  private async safeIdle(context: DeviceContext): Promise<DeviceState> {
+    const result = await context.session.safeIdle();
+    context.state = {
+      ...context.state,
       info: result.info,
       pin5: result.pin5,
       pin11Static: 0,
     };
-    this.emitDevice();
-    return this.deviceState;
+    this.emitDevice(context);
+    return context.state;
   }
 
-  private requireConnected(): void {
-    if (!this.deviceState.connected) throw new Error("设备尚未连接");
+  private async safeIdleAll(role: ClientRole): Promise<DeviceState[]> {
+    const contexts = [...this.devices.values()];
+    const results = await Promise.all(contexts.map((context) =>
+      this.withDeviceQueue(context, role, "全部设备安全空闲", this.priority(role), true, () =>
+        this.safeIdle(context))));
+    return results;
+  }
+
+  private resolveLatestCapture(params: unknown): CaptureFrame | null | SynchronizedCaptureGroup {
+    const input = asRecordOrEmpty(params);
+    if (input.group === true) return this.synchronizedCapture;
+    if (input.deviceId !== undefined) return this.resolveDevice(params).latestCapture;
+    return this.activeContext()?.latestCapture ?? null;
+  }
+
+  private activeContext(): DeviceContext | null {
+    return this.activeDeviceId ? this.devices.get(this.activeDeviceId) ?? null : null;
+  }
+
+  private resolveDevice(params: unknown): DeviceContext {
+    const input = asRecordOrEmpty(params);
+    const deviceId = typeof input.deviceId === "string"
+      ? input.deviceId
+      : typeof input.id === "string" && this.devices.has(input.id)
+        ? input.id
+        : this.activeDeviceId;
+    if (!deviceId) throw new Error("设备尚未连接");
+    const context = this.devices.get(deviceId);
+    if (!context) throw new Error(`设备 ${deviceId} 未连接`);
+    return context;
+  }
+
+  private nextAvailableIndex(): 1 | 2 | 3 | 4 | null {
+    const used = new Set([...this.devices.values()].map((context) => context.state.deviceIndex));
+    for (const index of [1, 2, 3, 4] as const) {
+      if (!used.has(index)) return index;
+    }
+    return null;
+  }
+
+  private async assertIndexAvailable(index: 1 | 2 | 3 | 4, exceptDeviceId?: string): Promise<void> {
+    const duplicate = [...this.devices.values()].find((context) =>
+      context.state.deviceId !== exceptDeviceId && context.state.deviceIndex === index);
+    if (duplicate) {
+      throw new Error(`设备编号 #${index} 已被 ${duplicate.state.alias} (${duplicate.state.port}) 使用`);
+    }
+  }
+
+  private async runOnDevice<T>(
+    role: ClientRole,
+    params: unknown,
+    label: string,
+    trackActivity: boolean,
+    work: (context: DeviceContext) => Promise<T>,
+    allowDisconnected = false,
+  ): Promise<T> {
+    const context = this.resolveDevice(params);
+    if (!allowDisconnected && !context.state.connected) throw new Error("设备尚未连接");
+    return this.withDeviceQueue(
+      context,
+      role,
+      `${context.state.alias} · ${label}`,
+      this.priority(role),
+      trackActivity,
+      () => work(context),
+    );
   }
 
   private async refreshStorageUsage(): Promise<void> {
@@ -568,8 +868,8 @@ export class DaemonBroker {
     void this.snapshot().then((data) => this.broadcast({ event: "snapshot", data }));
   }
 
-  private emitDevice(): void {
-    this.broadcast({ event: "device", data: this.deviceState });
+  private emitDevice(context: DeviceContext): void {
+    this.broadcast({ event: "device", data: context.state });
     this.emitSnapshot();
   }
 
@@ -585,7 +885,11 @@ export class DaemonBroker {
     return item;
   }
 
-  private updateActivity(id: string, status: ActivityItem["status"], detail?: string): void {
+  private updateActivity(
+    id: string,
+    status: ActivityItem["status"],
+    detail?: string,
+  ): void {
     const item = this.activity.find((entry) => entry.id === id);
     if (!item) return;
     item.status = status;
@@ -597,8 +901,6 @@ export class DaemonBroker {
     return role === "mcp" ? 10 : 20;
   }
 
-  private currentJobPriority: number | null = null;
-
   private withQueue<T>(
     role: ClientRole,
     label: string,
@@ -606,7 +908,6 @@ export class DaemonBroker {
     trackActivity: boolean,
     run: () => Promise<T>,
   ): Promise<T> {
-    this.requestCaptureYield(priority);
     return new Promise<T>((resolve, reject) => {
       this.queue.push({
         sequence: this.sequence++,
@@ -629,7 +930,6 @@ export class DaemonBroker {
     while (this.queue.length > 0) {
       const job = this.queue.shift();
       if (!job) break;
-      this.currentJobPriority = job.priority;
       const activity = job.trackActivity
         ? this.pushActivity({ role: job.role, label: job.label, status: "running" })
         : null;
@@ -641,20 +941,113 @@ export class DaemonBroker {
         const failure = error instanceof Error ? error : new Error(String(error));
         if (activity) this.updateActivity(activity.id, "error", failure.message);
         job.reject(failure);
-      } finally {
-        this.currentJobPriority = null;
       }
     }
     this.processing = false;
   }
 
-  private requestCaptureYield(incomingPriority: number): void {
-    const active = this.activeCapture;
+  private withDeviceQueue<T>(
+    context: DeviceContext,
+    role: ClientRole,
+    label: string,
+    priority: number,
+    trackActivity: boolean,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    this.requestCaptureYield(context, priority);
+    return new Promise<T>((resolve, reject) => {
+      context.queue.push({
+        sequence: context.sequence++,
+        priority,
+        role,
+        label,
+        deviceId: context.state.deviceId,
+        trackActivity,
+        run,
+        resolve: (value) => resolve(value as T),
+        reject,
+      });
+      context.queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence);
+      void this.runDeviceQueue(context);
+    });
+  }
+
+  private async runDeviceQueue(context: DeviceContext): Promise<void> {
+    if (context.processing) return;
+    context.processing = true;
+    while (context.queue.length > 0) {
+      const job = context.queue.shift();
+      if (!job) break;
+      context.currentJobPriority = job.priority;
+      const activity = job.trackActivity
+        ? this.pushActivity({
+            role: job.role,
+            deviceId: job.deviceId,
+            label: job.label,
+            status: "running",
+          })
+        : null;
+      try {
+        const result = await job.run();
+        if (activity) this.updateActivity(activity.id, "ok");
+        job.resolve(result);
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        if (activity) this.updateActivity(activity.id, "error", failure.message);
+        job.reject(failure);
+      } finally {
+        context.currentJobPriority = null;
+      }
+    }
+    context.processing = false;
+  }
+
+  private requestCaptureYield(context: DeviceContext, incomingPriority: number): void {
+    const active = context.activeCapture;
     if (!active || !active.abort || active.priority <= incomingPriority || active.yieldTimer) return;
     active.yieldTimer = setTimeout(() => {
-      if (this.activeCapture === active) void active.abort?.().catch(() => undefined);
+      if (context.activeCapture === active) void active.abort?.().catch(() => undefined);
     }, 200);
   }
+}
+
+function deviceIdentity(port: {
+  path: string;
+  serialNumber?: string;
+  locationId?: string;
+  pnpId?: string;
+}): { identity: string; stable: boolean } {
+  const serial = port.serialNumber?.trim();
+  if (serial && serial !== "123456") {
+    return { identity: `usb-serial:${serial}`, stable: true };
+  }
+  if (port.locationId) {
+    return { identity: `usb-location:${port.locationId}`, stable: false };
+  }
+  if (port.pnpId) {
+    return { identity: `usb-pnp:${port.pnpId}`, stable: false };
+  }
+  return { identity: `port:${port.path}`, stable: false };
+}
+
+function emptyDeviceState(): DeviceState {
+  return {
+    deviceId: "",
+    alias: "",
+    identity: "",
+    identityStable: false,
+    connected: false,
+    port: null,
+    connectedAt: null,
+    info: null,
+    pin5: null,
+    pin11Static: null,
+    deviceIndex: null,
+  };
+}
+
+function emptyRepeatState(deviceId?: string): RepeatState {
+  return { active: false, fps: 20, ownerRole: null, deviceId: deviceId ?? null };
 }
 
 function normalizeCaptureRequest(value: unknown): CaptureRequest {
@@ -708,6 +1101,10 @@ function optionalDeviceIndex(value: unknown): 0 | 1 | 2 | 3 | 4 | undefined {
     throw new Error("设备编号必须是 0、1、2、3 或 4");
   }
   return index as 0 | 1 | 2 | 3 | 4;
+}
+
+function deviceSlot(value: unknown): 1 | 2 | 3 | 4 | null {
+  return value === 1 || value === 2 || value === 3 || value === 4 ? value : null;
 }
 
 function mergeSettings(value: unknown): AppSettings {

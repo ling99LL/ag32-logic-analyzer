@@ -12,8 +12,11 @@ const requiredTools = [
   "list_devices",
   "connect_device",
   "disconnect_device",
+  "disconnect_all_devices",
+  "set_active_device",
   "get_device_info",
   "capture",
+  "capture_synchronized",
   "configure_pin5_square_wave",
   "configure_pin5_trigger_engine",
   "pin5_engine_control",
@@ -21,6 +24,7 @@ const requiredTools = [
   "configure_pin11_static_level",
   "run_loopback_check",
   "safe_idle",
+  "safe_idle_all",
   "get_latest_capture",
 ];
 const missingTools = requiredTools.filter((name) => !tools.tools.some((tool) => tool.name === name));

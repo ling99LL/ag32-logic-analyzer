@@ -3,7 +3,7 @@
 ### AG32VF303 四通道逻辑分析仪与信号发生器
 
 <p>
-  <a href="https://github.com/ling99LL/ag32-logic-analyzer/releases/tag/v0.1.2"><img alt="Release" src="https://img.shields.io/badge/release-v0.1.2-5266d7"></a>
+  <a href="https://github.com/ling99LL/ag32-logic-analyzer/releases/tag/v0.2.0"><img alt="Release" src="https://img.shields.io/badge/release-v0.2.0-5266d7"></a>
   <img alt="Windows" src="https://img.shields.io/badge/platform-Windows-22936f">
   <img alt="SUMP OLS" src="https://img.shields.io/badge/protocol-SUMP%20%2F%20OLS-d58b20">
   <img alt="MCP" src="https://img.shields.io/badge/integration-MCP-9a5ac7">
@@ -14,23 +14,25 @@
 [文件索引](INDEX.md) · [下载安装版](https://github.com/ling99LL/ag32-logic-analyzer/releases/latest) · [桌面端说明](mcp/README.md) · [硬件资料](hardware/README.md)
 
 <p align="center">
-  <a href="mcp/docs/images/ag32-logic-studio.png"><img src="mcp/docs/images/ag32-logic-studio.png" alt="AG32 Logic Studio v0.1.2 浅色工作台" width="980"></a>
+  <a href="mcp/docs/images/ag32-logic-studio.png"><img src="mcp/docs/images/ag32-logic-studio.png" alt="AG32 Logic Studio v0.2.0 浅色工作台" width="980"></a>
 </p>
 
-<p align="center"><sub>AG32 Logic Studio v0.1.2 · 四通道浅色波形工作台、硬件触发与通道测量</sub></p>
+<p align="center"><sub>AG32 Logic Studio v0.2.0 · 四设备工作区、独立 LED 编号、通道测量与 MCP 协同</sub></p>
 
-## 下载 AG32 Logic Studio v0.1.2
+## 下载 AG32 Logic Studio v0.2.0
 
 | 版本 | 适用方式 | 文件 |
 |---|---|---|
-| **EXE 安装包** | 按向导安装，创建桌面与开始菜单快捷方式 | [AG32 Logic Studio-0.1.2-x64-setup.exe](https://github.com/ling99LL/ag32-logic-analyzer/releases/download/v0.1.2/AG32.Logic.Studio-0.1.2-x64-setup.exe) |
-| **便携版 ZIP** | 解压后直接运行，不在系统安装 | [AG32 Logic Studio-0.1.2-x64-portable.zip](https://github.com/ling99LL/ag32-logic-analyzer/releases/download/v0.1.2/AG32.Logic.Studio-0.1.2-x64-portable.zip) |
+| **EXE 安装包** | 按向导安装，创建桌面与开始菜单快捷方式 | [AG32 Logic Studio-0.2.0-x64-setup.exe](https://github.com/ling99LL/ag32-logic-analyzer/releases/download/v0.2.0/AG32.Logic.Studio-0.2.0-x64-setup.exe) |
+| **便携版 ZIP** | 解压后直接运行，不在系统安装 | [AG32 Logic Studio-0.2.0-x64-portable.zip](https://github.com/ling99LL/ag32-logic-analyzer/releases/download/v0.2.0/AG32.Logic.Studio-0.2.0-x64-portable.zip) |
 
 Windows 10/11 x64。安装包暂未签名，首次运行时 Windows SmartScreen 可能要求确认。便携版的数据保存在解压目录下的 `data\`。
 
 ## 一个工作台，三条调试路径
 
 **波形分析** 将采样率、深度、预触发和触发设置集中在顶部；下方保留大面积 Canvas 波形、缩放、拖动、时间光标和四通道统计。支持立即触发、电平触发、边沿触发，以及单次采集和可开关的重复采集。
+
+**设备工作区** 可同时连接最多 4 台设备。每台设备占用一个 `#1`–`#4` 槽位，连接后只点亮对应编号的 LED；四个槽位分别拥有独立串口会话、命令队列、重复采集、输出状态和最新波形。两台以上设备可执行联合采集，并在同一页面查看 16 条通道。
 
 <table>
   <tr>
@@ -49,13 +51,20 @@ Windows 10/11 x64。安装包暂未签名，首次运行时 Windows SmartScreen 
 |---|---|
 | 采样 | `4 CH`、最高 `100 MSa/s`、`10 ns` 时间分辨率、最高 `8192` 点 |
 | 触发 | 立即、电平、任意通道上升/下降沿，支持 `0–90%` 预触发 |
-| 并发调试 | 桌面端与 MCP 共用 `ag32d`；命令事务优先、MCP 优先、采集帧级让出 |
+| 并发调试 | 桌面端与 MCP 共用 `ag32d`；最多 4 台设备并行会话，每台设备独立队列、MCP 事务优先与帧级让出 |
+| 多设备同步 | 主机并行布防/启动/读取，返回每台设备主机时间戳和启动偏差；严格时序比较仍需公共外部触发与公共参考时钟 |
 | 数字输出 | `PIN_5`：1 Hz 至 100 MHz 方波，或延时/主机触发电平与脉冲引擎 |
 | 模拟输出 | `PIN_11`：DAC 正弦、方波、锯齿、三角波，以及关闭/静态低/静态高 |
 | 历史记录 | 最近 100 帧内存预览；持久记录、收藏、VCD 导出与自动清理 |
 | 桌面体验 | 浅色仪器工作台、四页工作流、窄窗口响应式布局与安全空闲 |
 
 > PulseView 需要独占串口，不能与桌面端或 MCP 同时采集。切换工具前先断开当前连接。
+
+<p align="center">
+  <a href="mcp/docs/images/ag32-logic-studio-multi-device.png"><img src="mcp/docs/images/ag32-logic-studio-multi-device.png" alt="AG32 Logic Studio 两设备联合波形视图" width="960"></a>
+</p>
+
+<p align="center"><sub>四设备工作区与联合波形视图 · 每台设备独立 LED 编号，四台共 16 条通道</sub></p>
 
 <p align="center">
   <img src="hardware/images/prototype-board-closeup.jpg" alt="AG32VF303 四通道逻辑分析仪实物" width="760">
@@ -114,7 +123,13 @@ Windows 10/11 x64。安装包暂未签名，首次运行时 Windows SmartScreen 
 
 CPLD 器件必须使用 `AGRV2KQ32`，对应 QFN32 封装。这个型号不能按 LQFP100 的默认器件配置。
 
-固件 `v1.2` 支持由 AG32 Logic Studio 分配设备编号。连接时选择 `#1` 至 `#4` 后，设备只亮对应的 LED1 至 LED4，并暂停普通的 Ready/ARM/CAP/TX 状态灯模式；这样多台设备同时运行时可以直接通过面板 LED 识别当前设备。重新上电后编号清空，恢复正常状态灯，连接上位机时需重新分配。
+固件 `v1.3` 支持由 AG32 Logic Studio 分配设备编号。连接时选择 `#1` 至 `#4` 后，设备只亮对应的 LED1 至 LED4，并暂停普通的 Ready/ARM/CAP/TX 状态灯模式；这样多台设备同时运行时可以直接通过面板 LED 识别当前设备。USB 序列号由芯片 Flash UID 生成，同一块板换 USB 口后仍能被稳定识别。重新上电后 LED 编号清空，恢复正常状态灯，连接上位机时需重新分配。
+
+### 四设备联合采集的同步边界
+
+当前 `capture_synchronized` 会在主机侧并行布防四台设备，然后同时启动和读取，并记录每台设备的主机时间戳、启动偏差与总耗时。它不需要修改 CPLD 位流，适合状态联调、低速信号对照和近似同时采样。
+
+它**不是硬件同步采集**：每块板仍使用各自晶振，触发判断也独立发生。需要比较纳秒级边沿、长时间无漂移频率或严格同一时刻时，必须增加公共外部触发/公共参考时钟，并把同步输入引到四块板；这一层尚未在现有 `PIN_5`/DAC 输出方案中冒充实现。
 
 ## 硬件与结构
 
@@ -321,7 +336,7 @@ python .\tools\loopback_test.py COM33
 
 ## 桌面端与 MCP
 
-桌面端和 MCP 都只控制已经烧录好的设备。它们共用本机命名管道、命令事务队列、帧级采集让出、预览缓存和持久历史；不负责编译、烧录或 JTAG。
+桌面端和 MCP 都只控制已经烧录好的设备。它们共用本机命名管道、每设备独立命令事务队列、帧级采集让出、预览缓存和持久历史；不负责编译、烧录或 JTAG。
 
 ```powershell
 cd mcp
@@ -332,7 +347,7 @@ node .\scripts\mcp_selftest.mjs
 node .\dist\index.js
 ```
 
-MCP 保留原有工具名、参数和主要返回语义，并新增安全空闲、最近采集读取、PIN_5 单步控制和 PIN_11 静态输出。注册 MCP 时使用本仓库下的 `mcp\dist\index.js`，完整工具列表、桌面端架构和硬件检查步骤见 [mcp/README.md](mcp/README.md)。
+MCP 保留原有工具名、参数和主要返回语义。现有工具都允许附加可选 `deviceId`，省略时操作当前活动设备；新增 `set_active_device`、`capture_synchronized`、`safe_idle_all`、`disconnect_all_devices`、最近采集读取、PIN_5 单步控制和 PIN_11 静态输出。注册 MCP 时使用本仓库下的 `mcp\dist\index.js`，完整工具列表、桌面端架构和硬件检查步骤见 [mcp/README.md](mcp/README.md)。
 
 ## 使用限制
 

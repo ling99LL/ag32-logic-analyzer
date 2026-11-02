@@ -61,6 +61,27 @@ def main() -> None:
             page.get_by_text("实时采集 · 20 FPS").wait_for()
             page.get_by_role("button", name="停止", exact=True).click()
 
+            page.get_by_role("button", name="连接并点亮 LED3", exact=True).click()
+            page.get_by_text("2 / 4 在线", exact=True).wait_for()
+            page.get_by_role("button", name="联合采集", exact=True).click()
+            page.get_by_text("2 台设备联合视图", exact=True).wait_for()
+            group_canvas = page.locator(".group-waveform-wrap canvas").evaluate(
+                """canvas => {
+                    const ctx = canvas.getContext('2d');
+                    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                    let nonBackground = 0;
+                    for (let i = 0; i < data.length; i += 16) {
+                        if (data[i] < 235 || data[i + 1] < 235 || data[i + 2] < 235) nonBackground += 1;
+                    }
+                    return {width: canvas.width, height: canvas.height, nonBackground};
+                }
+                """
+            )
+            if group_canvas["nonBackground"] < 100:
+                raise RuntimeError(f"Joint waveform did not render: {group_canvas}")
+            page.screenshot(path=str(OUT / "group-1440.png"), full_page=True)
+            page.get_by_role("button", name="退出联合视图", exact=True).click()
+
             page.get_by_role("button", name="信号输出", exact=True).click()
             page.get_by_role("heading", name="数字输出 PIN_5").wait_for()
             page.get_by_role("button", name="应用数字方波").click()
@@ -74,7 +95,7 @@ def main() -> None:
             page.get_by_role("heading", name="历史记录").wait_for()
             page.locator(".history-table tbody tr").first.wait_for()
             page.get_by_role("textbox", name="搜索历史记录").fill("desktop")
-            if page.locator(".history-table tbody tr").count() != 1:
+            if page.locator(".history-table tbody tr").count() < 2:
                 raise RuntimeError("History search did not filter the saved frame")
             page.get_by_role("textbox", name="搜索历史记录").fill("")
             page.get_by_role("button", name="收藏记录", exact=True).first.click()

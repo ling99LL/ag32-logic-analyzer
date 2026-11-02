@@ -13,6 +13,8 @@ test("capture storage persists, reloads, favorites and deletes records", async (
     await store.init();
     const frame: CaptureFrame = {
       id: "20261031-120000-000-test",
+      deviceId: "usb-serial:AG32-TEST-1",
+      deviceAlias: "#1",
       createdAt: "2026-10-31T04:00:00.000Z",
       source: "desktop",
       persistent: true,
@@ -30,6 +32,8 @@ test("capture storage persists, reloads, favorites and deletes records", async (
     assert.ok(saved.artifacts?.samplesPath);
     const records = await store.list();
     assert.equal(records.length, 1);
+    assert.equal(records[0].deviceId, "usb-serial:AG32-TEST-1");
+    assert.equal(records[0].deviceAlias, "#1");
     const favorite = await store.favorite(frame.id, true);
     assert.equal(favorite.favorite, true);
     const loaded = await store.load(frame.id);
