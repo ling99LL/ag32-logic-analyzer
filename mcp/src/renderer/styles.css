@@ -52,6 +52,7 @@ select { color: var(--text); background: var(--surface); border: 1px solid var(-
 .connection-state.online i, .capture-state.live i, .footer-status.online i { background: var(--green); }
 .port-control { height: 35px; display: flex; align-items: center; gap: 5px; padding-left: 9px; background: var(--soft); border: 1px solid var(--border); border-radius: 5px; color: var(--muted); }
 .port-control select { width: 117px; border: 0; background: transparent; font-family: var(--mono); font-size: 11px; }
+.port-control .device-index-select { width: 48px; flex: 0 0 48px; padding: 0 3px 0 7px; border-left: 1px solid var(--border); border-radius: 0; color: var(--accent-dark); font-weight: 600; }
 .icon-button { width: 30px; height: 30px; display: inline-grid; place-items: center; flex-shrink: 0; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); }
 .icon-button:hover { background: #edf0f6; color: var(--text); }
 .icon-button.bordered { border: 1px solid var(--border); background: #fff; }

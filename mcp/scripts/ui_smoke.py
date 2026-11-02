@@ -28,6 +28,10 @@ def main() -> None:
             page.on("console", lambda message: errors.append(f"console: {message.text}") if message.type == "error" else None)
             page.goto(url, wait_until="networkidle")
             page.get_by_role("heading", name="逻辑分析仪", exact=True).wait_for()
+            page.get_by_role("combobox", name="设备编号").select_option("2")
+            page.wait_for_timeout(120)
+            if page.evaluate("JSON.parse(localStorage.getItem('ag32.deviceIndexByPort') || '{}').COM33") != 2:
+                raise RuntimeError("Device LED identity was not persisted for COM33")
 
             canvas_stats = page.locator("canvas").evaluate(
                 """canvas => {

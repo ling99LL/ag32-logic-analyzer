@@ -88,6 +88,19 @@ export class Ag32Session {
     await serial.close();
   }
 
+  async setDeviceIndex(deviceIndex: 0 | 1 | 2 | 3 | 4): Promise<ReturnType<typeof parseInfoFrame>> {
+    const serial = this.serialOrThrow;
+    await serial.write(makeExtendedFrame(OPS.deviceIndex, deviceIndex));
+    await serial.flush();
+    const info = await readInfoFrame(serial);
+    if (info.deviceIndex !== (deviceIndex || null)) {
+      throw new ProtocolError(
+        `Firmware did not accept device index ${deviceIndex}; update to firmware v1.2 or newer`,
+      );
+    }
+    return info;
+  }
+
   async getInfo(): Promise<ReturnType<typeof parseInfoFrame>> {
     return readInfoFrame(this.serialOrThrow);
   }

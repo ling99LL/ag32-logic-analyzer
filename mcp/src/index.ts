@@ -24,7 +24,7 @@ import type {
 } from "./shared/types.js";
 
 const server = new McpServer(
-  { name: "ag32-logic-studio-mcp", version: "0.1.0" },
+  { name: "ag32-logic-studio-mcp", version: "0.1.2" },
   {
     instructions:
       "Control the AG32VF303 logic analyzer and signal generator through the shared AG32 Logic Studio daemon. CH1-CH4 are inputs on PIN_7-10. PIN_5 is the digital output and PIN_11 is the DAC analog output. This server does not build or flash firmware.",
@@ -50,10 +50,14 @@ server.tool(
   },
 );
 
-server.tool("connect_device", "Connect to the AG32 Logic USB CDC port.", { port: portSchema }, async ({ port }) => {
-  await daemon.request("connect", { port });
+server.tool("connect_device", "Connect to an AG32 Logic USB CDC port and optionally assign its LED identity 1-4.", {
+  port: portSchema,
+  deviceIndex: z.number().int().min(1).max(4).optional()
+    .describe("Optional one-hot LED identity: device 1 lights LED1, device 4 lights LED4."),
+}, async ({ port, deviceIndex }) => {
+  await daemon.request("connect", { port, deviceIndex });
   const device = await daemon.request<DeviceState>("get_device_info");
-  return textResult({ connected: true, port, info: device.info, pin5: device.pin5 });
+  return textResult({ connected: true, port, deviceIndex: device.deviceIndex, info: device.info, pin5: device.pin5 });
 });
 
 server.tool("disconnect_device", "Close the current AG32 Logic serial connection.", {}, async () => {
@@ -68,6 +72,7 @@ server.tool("get_device_info", "Read firmware, PIN_11 and PIN_5 status.", {}, as
     info: device.info,
     pin5: device.pin5,
     pin11Static: device.pin11Static,
+    deviceIndex: device.deviceIndex,
   });
 });
 
@@ -247,6 +252,7 @@ server.resource(
           "- Digital output: PIN_5, square wave 1 Hz to 100 MHz, or delayed/host-triggered level and pulse engine.",
           "- Analog output: PIN_11, DAC0 sine/square/sawtooth/triangle. Default calibrated rate cap is 5 MSa/s.",
           "- Desktop UI and MCP share one daemon. MCP command transactions are prioritized, but capture ownership is granted one frame at a time.",
+          "- A host-assigned deviceIndex 1-4 lights exactly LED1-LED4 and overrides normal status LED patterns.",
           "- Closing a client does not change signal outputs. Call safe_idle explicitly when needed.",
           "- PIN_11 can turn off. PIN_5 cannot enter high impedance; safe_idle drives it low and stops toggling.",
           "- PulseView is an exclusive fallback and must not run while the daemon owns the CDC port.",
@@ -265,7 +271,7 @@ server.prompt("ag32_logic_debugging", "Operational workflow for another AI using
         text: [
           "Debug the AG32 logic analyzer end to end:",
           "1. Call list_devices and select the port that answers with SUMP ID 1ALS.",
-          "2. Call connect_device and read firmware status with get_device_info.",
+          "2. Call connect_device with an optional deviceIndex 1-4 and read firmware status with get_device_info.",
           "3. Configure PIN_5 or PIN_11 as needed. PIN_11 output must be explicitly enabled.",
           "4. Call capture. Check activeChannels and per-channel measurements; use the returned VCD artifact for detailed waveform inspection.",
           "5. For loopback, physically jumper the selected output to CH1-CH4 first. Report protocol PASS from physical activity separately.",

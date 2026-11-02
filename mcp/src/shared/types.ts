@@ -50,6 +50,7 @@ export interface FirmwareInfo {
   flags: number;
   tableLength: number;
   rateCapHz: number;
+  deviceIndex: 1 | 2 | 3 | 4 | null;
 }
 
 export interface Pin5Status {
@@ -138,6 +139,7 @@ export interface DeviceState {
   info: FirmwareInfo | null;
   pin5: Pin5Status | null;
   pin11Static: 0 | 1 | 2 | null;
+  deviceIndex: 1 | 2 | 3 | 4 | null;
 }
 
 export interface ClientState {
@@ -187,6 +189,7 @@ export interface SerialPortInfo {
   friendlyName?: string;
   sumpId?: boolean;
   firmware?: string;
+  deviceIndex?: 1 | 2 | 3 | 4 | null;
   error?: string;
 }
 
@@ -248,6 +251,7 @@ export type DaemonMethod =
   | "list_devices"
   | "connect"
   | "disconnect"
+  | "set_device_index"
   | "get_device_info"
   | "capture"
   | "start_repeat"

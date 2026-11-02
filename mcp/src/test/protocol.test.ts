@@ -21,6 +21,7 @@ import { normalizeTrigger, triggerMask } from "../session.js";
 
 test("extended frames are five bytes with little-endian payload", () => {
   assert.deepEqual([...makeExtendedFrame(0x84, 0x01020304)], [0x84, 0x04, 0x03, 0x02, 0x01]);
+  assert.deepEqual([...makeExtendedFrame(0x8f, 3)], [0x8f, 0x03, 0x00, 0x00, 0x00]);
 });
 
 test("sample count frame matches the SUMP word encoding", () => {
@@ -49,10 +50,12 @@ test("info and PIN_5 status frames are parsed", () => {
   info[12] = 1;
   info[13] = 8;
   info.writeUInt32LE(5_000_000, 14);
+  info[18] = 3;
   const parsed = parseInfoFrame(info);
   assert.equal(parsed.firmware.minor, 1);
   assert.equal(parsed.waveform, "square");
   assert.equal(parsed.tableLength, 256);
+  assert.equal(parsed.deviceIndex, 3);
 
   const pin5 = Buffer.alloc(7);
   pin5[0] = 1;

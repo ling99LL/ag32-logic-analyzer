@@ -21,8 +21,9 @@ export interface Ag32DesktopApi {
 export interface Ag32InvokeMap {
   snapshot: AppSnapshot;
   list_devices: DeviceListResult;
-  connect: { connected: true; port: string };
+  connect: { connected: true; port: string; deviceIndex: 1 | 2 | 3 | 4 | null };
   disconnect: { connected: false };
+  set_device_index: AppSnapshot["device"];
   get_device_info: AppSnapshot["device"];
   capture: CaptureFrame;
   start_repeat: AppSnapshot["repeat"];
@@ -44,7 +45,8 @@ export interface Ag32InvokeMap {
 }
 
 export interface Ag32InvokePayloads {
-  connect: { port: string };
+  connect: { port: string; deviceIndex?: 1 | 2 | 3 | 4 };
+  set_device_index: { deviceIndex: 1 | 2 | 3 | 4 | 0 };
   capture: CaptureRequest;
   start_repeat: { fps: number; request: Omit<CaptureRequest, "persist"> };
   configure_pin5_square: { frequencyHz: number };

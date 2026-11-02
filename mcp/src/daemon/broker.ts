@@ -85,6 +85,7 @@ export class DaemonBroker {
     info: null,
     pin5: null,
     pin11Static: null,
+    deviceIndex: null,
   };
   private storageUsage: StorageUsage = {
     previewBytes: 0,
@@ -132,6 +133,8 @@ export class DaemonBroker {
         return this.withQueue(role, "连接设备", this.priority(role), true, () => this.connect(params));
       case "disconnect":
         return this.withQueue(role, "断开设备", this.priority(role), true, () => this.disconnect());
+      case "set_device_index":
+        return this.withQueue(role, "设置设备编号", this.priority(role), true, () => this.setDeviceIndex(params));
       case "get_device_info":
         return this.withQueue(role, "读取设备状态", this.priority(role), false, () => this.readDeviceState());
       case "capture":
@@ -228,6 +231,7 @@ export class DaemonBroker {
           firmware: this.deviceState.info
             ? `v${this.deviceState.info.firmware.major}.${this.deviceState.info.firmware.minor}`
             : undefined,
+          deviceIndex: this.deviceState.deviceIndex,
         });
         continue;
       }
@@ -243,6 +247,7 @@ export class DaemonBroker {
           path: port,
           sumpId,
           firmware: info ? `v${info.firmware.major}.${info.firmware.minor}` : undefined,
+          deviceIndex: info?.deviceIndex ?? null,
         });
       } catch (error) {
         devices.push({ path: port, error: error instanceof Error ? error.message : String(error) });
@@ -256,19 +261,31 @@ export class DaemonBroker {
     };
   }
 
-  private async connect(params: unknown): Promise<{ connected: true; port: string }> {
+  private async connect(
+    params: unknown,
+  ): Promise<{ connected: true; port: string; deviceIndex: 1 | 2 | 3 | 4 | null }> {
     const input = asRecord(params);
     if (typeof input.port !== "string" || input.port.length === 0) throw new Error("缺少串口名称");
-    const info = await this.session.connect(input.port);
-    this.deviceState = {
-      connected: true,
-      port: input.port,
-      info,
-      pin5: await this.session.getPin5Status().catch(() => null),
-      pin11Static: null,
-    };
-    this.emitDevice();
-    return { connected: true, port: input.port };
+    const requestedIndex = optionalDeviceIndex(input.deviceIndex);
+    try {
+      let info = await this.session.connect(input.port);
+      if (requestedIndex !== undefined) {
+        info = await this.session.setDeviceIndex(requestedIndex);
+      }
+      this.deviceState = {
+        connected: true,
+        port: input.port,
+        info,
+        pin5: await this.session.getPin5Status().catch(() => null),
+        pin11Static: null,
+        deviceIndex: info.deviceIndex,
+      };
+      this.emitDevice();
+      return { connected: true, port: input.port, deviceIndex: info.deviceIndex };
+    } catch (error) {
+      await this.session.disconnect().catch(() => undefined);
+      throw error;
+    }
   }
 
   private async disconnect(): Promise<{ connected: false }> {
@@ -280,9 +297,25 @@ export class DaemonBroker {
       info: null,
       pin5: null,
       pin11Static: null,
+      deviceIndex: null,
     };
     this.emitDevice();
     return { connected: false };
+  }
+
+  private async setDeviceIndex(params: unknown): Promise<DeviceState> {
+    this.requireConnected();
+    const input = asRecord(params);
+    const deviceIndex = optionalDeviceIndex(input.deviceIndex);
+    if (deviceIndex === undefined) throw new Error("设备编号必须是 1、2、3 或 4");
+    const info = await this.session.setDeviceIndex(deviceIndex);
+    this.deviceState = {
+      ...this.deviceState,
+      info,
+      deviceIndex: info.deviceIndex,
+    };
+    this.emitDevice();
+    return this.deviceState;
   }
 
   private async readDeviceState(): Promise<DeviceState> {
@@ -666,6 +699,15 @@ function normalizePin5Engine(value: unknown): Pin5EngineConfig {
     widthNs: Math.max(0, Number(input.widthNs) || 0),
     action,
   };
+}
+
+function optionalDeviceIndex(value: unknown): 0 | 1 | 2 | 3 | 4 | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const index = Number(value);
+  if (!Number.isInteger(index) || index < 0 || index > 4) {
+    throw new Error("设备编号必须是 0、1、2、3 或 4");
+  }
+  return index as 0 | 1 | 2 | 3 | 4;
 }
 
 function mergeSettings(value: unknown): AppSettings {

@@ -16,9 +16,11 @@ import type {
 import { DEFAULT_SETTINGS } from "../shared/types.js";
 
 type ViewName = "analyzer" | "outputs" | "history";
+type DeviceIndex = 1 | 2 | 3 | 4;
 const CHANNEL_NAMES: ChannelName[] = ["CH1", "CH2", "CH3", "CH4"];
+const DEVICE_INDEX_BY_PORT_KEY = "ag32.deviceIndexByPort";
 const EMPTY_DEVICE: AppSnapshot["device"] = {
-  connected: false, port: null, info: null, pin5: null, pin11Static: null,
+  connected: false, port: null, info: null, pin5: null, pin11Static: null, deviceIndex: null,
 };
 
 export default function App() {
@@ -28,6 +30,7 @@ export default function App() {
   const [latestCapture, setLatestCapture] = useState<CaptureFrame | null>(null);
   const [deviceList, setDeviceList] = useState<DeviceListResult | null>(null);
   const [selectedPort, setSelectedPort] = useState("COM33");
+  const [deviceIndex, setDeviceIndexState] = useState<DeviceIndex>(() => savedDeviceIndex("COM33"));
   const [view, setView] = useState<ViewName>("analyzer");
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -99,20 +102,41 @@ export default function App() {
       setDeviceList(result);
       const nextPort = result.selected ?? result.devices.find((device) => device.sumpId)?.path
         ?? result.devices[0]?.path ?? selectedPort;
-      if (nextPort) setSelectedPort(nextPort);
+      if (nextPort) choosePort(nextPort);
     } catch (failure) { setError(errorText(failure)); }
     finally { setScanning(false); }
   }
 
   async function connect(): Promise<void> {
     await operation(async () => {
-      await api.invoke("connect", { port: selectedPort });
+      await api.invoke("connect", { port: selectedPort, deviceIndex });
       setSnapshot(await api.invoke<AppSnapshot>("snapshot"));
-      setNotice(`已连接 ${selectedPort}`);
+      setNotice(`已连接 ${selectedPort}，设备 ${deviceIndex} 点亮 LED${deviceIndex}`);
     });
   }
   async function disconnect(): Promise<void> {
     await operation(async () => { await api.invoke("disconnect"); setNotice("设备已断开"); });
+  }
+  function choosePort(port: string): void {
+    setSelectedPort(port);
+    setDeviceIndexState(savedDeviceIndex(port));
+  }
+  async function chooseDeviceIndex(next: DeviceIndex): Promise<void> {
+    const previous = deviceIndex;
+    setDeviceIndexState(next);
+    saveDeviceIndex(selectedPort, next);
+    if (!connected) return;
+    setBusyCount((count) => count + 1);
+    try {
+      await api.invoke("set_device_index", { deviceIndex: next });
+      setNotice(`设备编号已切换为 ${next}，点亮 LED${next}`);
+    } catch (failure) {
+      setDeviceIndexState(previous);
+      saveDeviceIndex(selectedPort, previous);
+      setError(errorText(failure));
+    } finally {
+      setBusyCount((count) => Math.max(0, count - 1));
+    }
   }
   async function captureOnce(): Promise<void> {
     await operation(async () => {
@@ -220,10 +244,14 @@ export default function App() {
           <div className="topbar-actions">{isMockMode && <span className="preview-badge">预览模式</span>}
             <div className={connected ? "connection-state online" : "connection-state"}><i />{connected ? "设备已连接" : "设备未连接"}</div>
             <div className="port-control"><Usb size={16} />
-              <select aria-label="设备串口" value={selectedPort} onChange={(event) => setSelectedPort(event.target.value)} disabled={connected}>
+              <select className="port-select" aria-label="设备串口" value={selectedPort} onChange={(event) => choosePort(event.target.value)} disabled={connected}>
                 {(deviceList?.devices.length ? deviceList.devices : [{ path: selectedPort }]).map((device) => (
                   <option key={device.path} value={device.path}>{device.path}{device.sumpId ? " · AG32" : ""}</option>))}
-              </select><button className="icon-button" title="重新扫描串口" onClick={() => void scanDevices()} disabled={scanning || connected}>
+              </select>
+              <select className="device-index-select" aria-label="设备编号" title="设备编号决定常亮 LED" value={deviceIndex} onChange={(event) => void chooseDeviceIndex(Number(event.target.value) as DeviceIndex)}>
+                {([1, 2, 3, 4] as DeviceIndex[]).map((index) => <option key={index} value={index}>#{index}</option>)}
+              </select>
+              <button className="icon-button" title="重新扫描串口" onClick={() => void scanDevices()} disabled={scanning || connected}>
                 <RefreshCw size={15} className={scanning ? "spin" : ""} /></button></div>
             <button className={connected ? "secondary-button" : "primary-button"} onClick={() => void (connected ? disconnect() : connect())} disabled={busy || !selectedPort}>
               {connected ? "断开连接" : "连接设备"}</button>
@@ -316,4 +344,24 @@ function buildTrigger(settings: AppSettings) {
 }
 function errorText(failure: unknown): string {
   return failure instanceof Error ? failure.message : String(failure);
+}
+
+function savedDeviceIndex(port: string): DeviceIndex {
+  try {
+    const mapping = JSON.parse(window.localStorage.getItem(DEVICE_INDEX_BY_PORT_KEY) ?? "{}") as Record<string, unknown>;
+    const value = Number(mapping[port]);
+    return value >= 1 && value <= 4 ? value as DeviceIndex : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function saveDeviceIndex(port: string, index: DeviceIndex): void {
+  try {
+    const mapping = JSON.parse(window.localStorage.getItem(DEVICE_INDEX_BY_PORT_KEY) ?? "{}") as Record<string, unknown>;
+    mapping[port] = index;
+    window.localStorage.setItem(DEVICE_INDEX_BY_PORT_KEY, JSON.stringify(mapping));
+  } catch {
+    // Storage failure must not prevent changing the physical LED identity.
+  }
 }

@@ -19,6 +19,8 @@ AG32 Logic Studio 是 AG32VF303 四通道逻辑分析仪的桌面端、本机串
 | Digital output B | PIN_5 | output | 1 Hz to 100 MHz square wave, or delayed/host-triggered level and pulse engine |
 | Analog output A | PIN_11 | output | DAC0 sine/square/sawtooth/triangle, calibrated default cap 5 MSa/s |
 
+Firmware v1.2 can assign one LED identity per board. In the desktop app, select `#1`–`#4` beside the COM port before connecting, or change it while connected. Device `#N` lights only LED `N`; host identity mode overrides the normal Ready/ARM/CAP/TX patterns until the board is reset. MCP clients can pass the optional `deviceIndex` argument to `connect_device`.
+
 ## Architecture
 
 ```text
@@ -85,7 +87,7 @@ The USB CDC port is shared with PulseView. Close PulseView before connecting thr
 
 With the device connected:
 
-1. Use `list_devices` and expect `sumpId: true`, firmware `v1.1`.
+1. Use `list_devices` and expect `sumpId: true`, firmware `v1.2`.
 2. Configure `PIN_5` to 100 kHz and call `capture`. With no jumper, all CH inputs should be static.
 3. Jumper PIN_5 to any CH input, repeat capture, and confirm that channel has edges near 100 kHz.
 4. Configure PIN_11 square 100 kHz, jumper PIN_11 to any CH input, capture, then disable PIN_11 and confirm the channel returns to static.

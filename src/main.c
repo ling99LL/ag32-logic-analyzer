@@ -18,10 +18,13 @@
  *             0 = trigger/pulse engine (delay -> level/pulse, host triggered)
  *
  * Status LEDs (Active-LOW, GPIO4_1..4 on QFN32):
- *   LED1: PIN_19 (Idle / Ready)
- *   LED2: PIN_18 (Armed / Waiting Trigger)
- *   LED3: PIN_13 (Capturing / Sampling)
- *   LED4: PIN_14 (Transmitting Data)
+ *   Normal mode:
+ *     LED1: PIN_19 (Idle / Ready)
+ *     LED2: PIN_18 (Armed / Waiting Trigger)
+ *     LED3: PIN_13 (Capturing / Sampling)
+ *     LED4: PIN_14 (Transmitting Data)
+ *   Host-assigned device mode:
+ *     device 1..4 lights exactly LED1..LED4; status patterns are suspended.
  *
  * CPLD Memory Map (Base: 0x60000000):
  *   0x60000000: REG_CTRL     [0:ARM, 2:FORCE, 3:SQ_EN, 7:4:TRIG_MASK, 11:8:TRIG_VAL, 23:16:CLK_DIV]
@@ -91,6 +94,7 @@
 #define GEN_OP_RATE_CAP    0x8B
 #define GEN_OP_GET_INFO    0x8C
 #define GEN_OP_P5_QUERY    0x8D
+#define GEN_OP_DEVICE_INDEX 0x8F
 #define GEN_RESP_SYNC      0xAA
 #define CMD_U32(cb) ((uint32_t)(cb)[1] | ((uint32_t)(cb)[2] << 8) | \
                      ((uint32_t)(cb)[3] << 16) | ((uint32_t)(cb)[4] << 24))
@@ -111,7 +115,19 @@ static uint8_t sample_buffer[BUFFER_SIZE];
 #define ALL_LEDS        (LED1_BIT | LED2_BIT | LED3_BIT | LED4_BIT)
 
 #define LED_GPIO GPIO4
+static uint8_t led_device_slot = 0;
+static const uint8_t LED_DEVICE_BITS[4] = { LED1_BIT, LED2_BIT, LED3_BIT, LED4_BIT };
+
+static inline void show_device_slot_led(void) {
+  GPIO_SetHigh(LED_GPIO, ALL_LEDS);
+  GPIO_SetLow(LED_GPIO, LED_DEVICE_BITS[led_device_slot - 1]);
+}
+
 static inline void set_led(uint8_t bit, int on) {
+  if (led_device_slot != 0) {
+    show_device_slot_led();
+    return;
+  }
   if (on) {
     GPIO_SetLow(LED_GPIO, bit);
   } else {
@@ -120,6 +136,10 @@ static inline void set_led(uint8_t bit, int on) {
 }
 
 static inline void set_all_leds(int on) {
+  if (led_device_slot != 0) {
+    show_device_slot_led();
+    return;
+  }
   if (on) {
     GPIO_SetLow(LED_GPIO, ALL_LEDS);
   } else {
@@ -136,7 +156,7 @@ static void comm_send_byte(uint8_t c);
 static void comm_flush(void);
 
 #define GEN_VER_MAJOR       1
-#define GEN_VER_MINOR       1
+#define GEN_VER_MINOR       2
 #define WAVE_TABLE_MAX      2048
 #define DAC_SAMPLE_RATE     100000000u  /* APB clock: DAC update is 100MHz/(div+1) */
 
@@ -286,7 +306,7 @@ static void gen_send_info(void) {
   b[15] = (uint8_t)(gen_rate_cap >> 8);
   b[16] = (uint8_t)(gen_rate_cap >> 16);
   b[17] = (uint8_t)(gen_rate_cap >> 24);
-  b[18] = 0;
+  b[18] = led_device_slot;
   b[19] = 0;
   gen_send_frame(b, 20);
 }
@@ -837,6 +857,17 @@ static void process_sump_byte(uint8_t b) {
         gen_send_info();
       } else if (op == GEN_OP_P5_QUERY) {
         gen_send_p5_status();
+      } else if (op == GEN_OP_DEVICE_INDEX) {
+        uint32_t slot = CMD_U32(cmd_buf);
+        if (slot <= 4u) {
+          led_device_slot = (uint8_t)slot;
+          if (led_device_slot != 0) {
+            show_device_slot_led();
+          } else {
+            set_all_leds(0);
+            set_led(LED_IDLE_BIT, 1);
+          }
+        }
       } else if (op >= 0xC0 && op <= 0xCF) {
         // Standard SUMP / OLS: (op & 0x03) == 0x00 is MASK, 0x01 is VALUE
         uint32_t val32 = (cmd_buf[4] << 24) | (cmd_buf[3] << 16) | (cmd_buf[2] << 8) | cmd_buf[1];
@@ -964,7 +995,7 @@ int main(void) {
     }
 
     // Idle heartbeat: LED1 stays lit, soft rotating pulse every 1.5s
-    if (UTIL_GetTick() - led_flow_timer > 1500) {
+    if (led_device_slot == 0 && UTIL_GetTick() - led_flow_timer > 1500) {
       led_flow_timer = UTIL_GetTick();
       uint8_t next_led = leds[1 + ((led_flow_idx++) % 3)]; // cycle LED2, LED3, LED4
       set_led(next_led, 1);

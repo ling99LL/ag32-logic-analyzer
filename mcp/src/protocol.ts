@@ -39,6 +39,7 @@ export const OPS = {
   getInfo: 0x8c,
   pin5Query: 0x8d,
   pin11Static: 0x8e,
+  deviceIndex: 0x8f,
 } as const;
 
 export const WAVE_TYPE_CODES: Record<WaveType, number> = {
@@ -162,6 +163,10 @@ export function parseInfoFrame(payload: Buffer): FirmwareInfo {
   const typeCode = payload[2];
   const waveform = WAVE_TYPES[typeCode] as WaveType | undefined;
   if (!waveform) throw new ProtocolError(`Unknown waveform code: ${typeCode}`);
+  const rawDeviceIndex = payload[18];
+  const deviceIndex = rawDeviceIndex >= 1 && rawDeviceIndex <= 4
+    ? rawDeviceIndex as 1 | 2 | 3 | 4
+    : null;
   return {
     firmware: { major: payload[0], minor: payload[1] },
     waveform,
@@ -171,6 +176,7 @@ export function parseInfoFrame(payload: Buffer): FirmwareInfo {
     flags: payload[12],
     tableLength: 1 << payload[13],
     rateCapHz: payload.readUInt32LE(14) || PIN11_DEFAULT_RATE_CAP_HZ,
+    deviceIndex,
   };
 }
 

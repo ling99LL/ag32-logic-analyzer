@@ -23,8 +23,9 @@ export function createMockApi(): Ag32DesktopApi & {
     device: {
       connected: true,
       port: "COM33",
+      deviceIndex: 1,
       info: {
-        firmware: { major: 1, minor: 1 },
+        firmware: { major: 1, minor: 2 },
         waveform: "sine",
         amplitudePercent: 80,
         requestedFrequencyHz: 100_000,
@@ -32,6 +33,7 @@ export function createMockApi(): Ag32DesktopApi & {
         flags: 0,
         tableLength: 256,
         rateCapHz: 5_000_000,
+        deviceIndex: 1,
       },
       pin5: {
         busy: false,
@@ -58,7 +60,7 @@ export function createMockApi(): Ag32DesktopApi & {
         role: "desktop",
         label: "连接设备",
         status: "ok",
-        detail: "COM33 / GEN v1.1",
+        detail: "COM33 / GEN v1.2",
       },
     ],
     storage: {
@@ -124,19 +126,31 @@ export function createMockApi(): Ag32DesktopApi & {
           return {
             selected: "COM33",
             devices: [
-              { path: "COM33", sumpId: true, firmware: "v1.1", friendlyName: "AG32 USB CDC" },
+              { path: "COM33", sumpId: true, firmware: "v1.2", deviceIndex: 1, friendlyName: "AG32 USB CDC" },
               { path: "COM26", sumpId: false, error: "无 SUMP 响应" },
             ],
           } as T;
         case "connect":
           snapshot.device.connected = true;
           snapshot.device.port = String(input.port ?? "COM33");
+          snapshot.device.deviceIndex = Number(input.deviceIndex) as 1 | 2 | 3 | 4;
+          if (snapshot.device.info) snapshot.device.info.deviceIndex = snapshot.device.deviceIndex;
           emit({ event: "snapshot", data: snapshot });
-          return { connected: true, port: snapshot.device.port } as T;
+          return { connected: true, port: snapshot.device.port, deviceIndex: snapshot.device.deviceIndex } as T;
         case "disconnect":
           snapshot.device.connected = false;
+          snapshot.device.deviceIndex = null;
+          if (snapshot.device.info) snapshot.device.info.deviceIndex = null;
           emit({ event: "snapshot", data: snapshot });
           return { connected: false } as T;
+        case "set_device_index": {
+          const index = Number(input.deviceIndex);
+          if (![1, 2, 3, 4].includes(index)) throw new Error("设备编号必须是 1、2、3 或 4");
+          snapshot.device.deviceIndex = index as 1 | 2 | 3 | 4;
+          if (snapshot.device.info) snapshot.device.info.deviceIndex = snapshot.device.deviceIndex;
+          emit({ event: "device", data: snapshot.device });
+          return snapshot.device as T;
+        }
         case "get_device_info":
           return snapshot.device as T;
         case "capture":
